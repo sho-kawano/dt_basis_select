@@ -1,0 +1,54 @@
+_results/
+.Rapp.history
+.DS_Store
+.Rhistory
+.DS_Store
+z_archive/
+*.zip
+.RData
+.Rproj.user/
+*.Rproj
+*.txt
+
+# Environment variables (contains sensitive API keys)
+.Renviron
+
+# Old config format (replaced by sim_config.RDS)
+core_inputs.RDA
+
+# Generated results and configs
+results.RDS
+results_list.RDS
+overall_summary.RDS
+sim_config.RDS
+all_results.csv
+*.nb.html
+saved_results/
+
+# Test files
+test.R
+test_*.R
+test_*.log
+rerun_failed.R
+
+# Backup files
+*_backup.Rmd
+analysis_backup.Rmd
+
+# Personal notes and documentation PDFs
+Claude.md
+*.pdf
+main.tex
+
+# Claude Code configuration (personal)
+.claude/
+
+# LaTeX temporary files
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+
+# Old files directory
+old files/
