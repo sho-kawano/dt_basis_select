@@ -8,7 +8,7 @@ library(tidyverse)
 # n_reps is the number of repetitions (independent data thinning splits)
 run_dt <- function(comp_no, k, s, all_covs, all_data, results_dir, eps = 0.5, n_reps = 1) {
   # ----- loading data /samplers -----
-  source("samplers/fh_fit.R")
+  source("models/fh_fit.R")
 
   # specify folder/comparison
   comp_folder <- file.path(getwd(), results_dir, sprintf("comparison_%03d", comp_no))

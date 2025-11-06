@@ -52,3 +52,7 @@ main.tex
 
 # Old files directory
 old files/
+
+# Claude documentation and data files
+_for_claude/
+data/

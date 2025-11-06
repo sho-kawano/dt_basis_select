@@ -14,7 +14,7 @@ run_esim <- function(comp_no, s, all_covs, n_cores, all_data, results_dir, n_ite
   comp_folder = file.path(getwd(), results_dir, sprintf("comparison_%03d", comp_no))
 
   # load sampler
-  source("samplers/fh_fit.R")
+  source("models/fh_fit.R")
 
   # ---- decide parallelization strategy based on n_cores ----
   if(n_cores > 1) {
