@@ -1,4 +1,4 @@
-summary_esim <- function(comp_no, all_data, results_dir,
+summary_esim <- function(comp_no, results_dir,
                          validation=c("standard", "data_fission"),
                          n_iters=100){
   validation <- match.arg(validation)
@@ -11,8 +11,10 @@ summary_esim <- function(comp_no, all_data, results_dir,
     # load the mcmc_summary
     results = readRDS(file.path(comp_folder, "emp_sim", sprintf("%03d", sim_no), "results.RDS"))
 
-    # load z (original noisy estimate)
-    z = readRDS(file.path(comp_folder, "z.RDS")) %>% as.numeric()
+    # load z (original noisy estimate) - new format with PUMA IDs
+    z_data = readRDS(file.path(comp_folder, "z.RDS"))
+    puma_ids = z_data$puma
+    z = z_data$values
 
     # Choose validation target based on method
     if(validation == "standard") {
@@ -30,7 +32,7 @@ summary_esim <- function(comp_no, all_data, results_dir,
     res = results %>%
       select(domain, mean, method) %>%
       rename(fips=domain, estim=mean) %>%
-      left_join(tibble(fips=all_data$fips, truth=truth), by = join_by(fips))
+      left_join(tibble(fips=puma_ids, truth=truth), by = join_by(fips))
 
     # calculate mse
     res %>%

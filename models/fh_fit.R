@@ -1,6 +1,6 @@
 library(Matrix);  library(LaplacesDemon); library(dplyr)
 
-source("samplers/mcmc_helper.R")
+source("models/mcmc_helper.R")
 
 #' Description: runs one MCMC chain to fit a basic Fay-Herriot model (IID effects only)
 #' @param X the covariates (from model.matrix, include intercept)

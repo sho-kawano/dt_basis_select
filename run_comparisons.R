@@ -14,7 +14,7 @@
 # ==============================================================================
 # CONFIGURATION: Set to save results with a specific name
 # ==============================================================================
-SAVE_AS <- "x32_survey_var" # Set to NULL to skip, or "run_name" to save to saved_results/run_name/
+SAVE_AS <- "HICOV" # Set to NULL to skip, or "run_name" to save to saved_results/run_name/
 
 library(parallel)
 library(doParallel)
@@ -33,60 +33,35 @@ cat("===========================================================================
 
 cat("=== PART 1: DATA SETUP & CONFIGURATION ===\n\n")
 
-# ---- Download & create junk variables ----
-if (file.exists("data/data_IL.RDA")) {
-  cat("Loading existing data from data/data_IL.RDA...\n")
-  load("data/data_IL.RDA")
-} else {
-  cat("Downloading data from Census API...\n")
-  source("sim_functions/load_county.R")
-  census_key <- Sys.getenv("CENSUS_API_KEY")
-  if (census_key == "") {
-    stop("CENSUS_API_KEY environment variable not set. Please set it in .Renviron file.")
-  }
-  data <- load_county("IL", census_key, save = T)
+# ---- Load PUMS data ----
+cat("Loading CA PUMS data...\n")
 
-  load("data/data_IL.RDA")
-  set.seed(7)
-  all_data$junk1 <- rcauchy(nrow(all_data))
-  all_data$junk2 <- rnorm(nrow(all_data), mean = 1, sd = 1)
-  all_data$junk3 <- rexp(nrow(all_data), rate = 2)
-  all_data$junk4 <- rpois(nrow(all_data), lambda = 5)
-  save(all_data, file = "data/data_IL.RDA")
-  cat("✓ Data saved to data/data_IL.RDA\n")
-}
+# Load individual-level population data for sampling
+acs_pop <- readRDS("data/ca_pums_population.rds")
+cat(sprintf("✓ Population data loaded: %d individuals\n", nrow(acs_pop)))
 
-# ---- Load data, set things up ----
-load("data/data_IL.RDA")
-y <- all_data$povPerc
-d <- all_data$povPercSE^2
-
-# 8 covariates - 4 is the right amount
-true_covs <- c("assistance", "age.18_24", "hispanic", "no_car")
-all_covs <- c(
-  "assistance", "age.18_24", "hispanic", "no_car",
-  "junk1", "junk2", "junk3", "junk4"
+# Define predictors (13 variables - matches create_X in sampling_and_setup.R)
+predictor_names <- c(
+  # Demographics (8)
+  "mean_age", "pct_male", "pct_white", "pct_black",
+  "pct_asian", "pct_hispanic", "pct_married", "pct_citizen",
+  # Economic (1)
+  "employment_rate",
+  # Education (1)
+  "pct_bachelor",
+  # Housing (1)
+  "homeownership_rate",
+  # Health (2)
+  "disability_rate", "has_hicov"
 )
 
-X_true <- model.matrix(~., all_data[, true_covs, drop = F])
-
-set.seed(555)
-# Key input (random effects variance)
-sig2 <- (0.04)^2
-v_IID <- rnorm(n = length(y), sd = sqrt(sig2))
-# loosely based on lm(log(y)~X_true-1) %>% summary()
-beta <- c(-3.85, 6.4, 2.6, -1.2, 3.7)
-synth_mean <- X_true %*% beta + v_IID
+cat(sprintf("✓ Using %d predictors\n", length(predictor_names)))
 
 # ---- Simulation parameters ----
 n_comp <- 50
-n_cores <- 10 # Use 11 out of 12 cores (leave 1 for OS)
+n_cores <- 10 # Use 10 out of 12 cores (leave cores for OS)
 thinning_param <- 0.5 # Data thinning parameter (only applies to k=1; for k>1 it is 1/k)
 n_reps_dt <- 1 # Number of repetitions for data thinning (independent splits)
-
-# for log(y), survey variance is #(d/y^2)
-chosen_var <- (d / y^2) * 32
-truth <- synth_mean %>% as.numeric()
 
 # Create configuration object with all shared parameters
 sim_config <- list(
@@ -96,14 +71,11 @@ sim_config <- list(
   thinning_param = thinning_param,
   n_reps_dt = n_reps_dt,
 
-  # Data
-  all_data = all_data,
-  truth = truth,
-  chosen_var = chosen_var,
-
-  # Covariates
-  all_covs = all_covs,
-  true_covs = true_covs,
+  # Data (NEW: design-based sampling from population)
+  acs_pop = acs_pop,                    # Individual-level population for PPS sampling
+  samp_frac = 0.0225,                   # Sampling fraction (2.25% - tested optimal)
+  response_var = "medi_cal_qualified",  # Response variable
+  X_approach = "population",            # Compute X from population (vs "estimated" from sample)
 
   # Paths
   results_dir = "_results",
@@ -113,29 +85,28 @@ sim_config <- list(
 # Save config object
 saveRDS(sim_config, "sim_config.RDS")
 
-cat(sprintf("✓ Configuration created:\n"))
+cat(sprintf("\n✓ Configuration created:\n"))
 cat(sprintf("  - %d comparisons\n", n_comp))
 cat(sprintf("  - %d cores\n", n_cores))
 cat(sprintf("  - Thinning parameter: %.2f (for k=1)\n", thinning_param))
 cat(sprintf("  - DT repetitions: %d\n", n_reps_dt))
-cat(sprintf(
-  "  - %d covariates (%d true, %d junk)\n",
-  length(all_covs), length(true_covs), length(all_covs) - length(true_covs)
-))
-cat(sprintf("  - %d areas (counties)\n\n", nrow(all_data)))
+cat(sprintf("  - %d predictors\n", length(predictor_names)))
+cat(sprintf("  - Response variable: %s\n", sim_config$response_var))
+cat(sprintf("  - Sampling fraction: %.4f (%.2f%%)\n", sim_config$samp_frac, 100*sim_config$samp_frac))
+cat(sprintf("  - X approach: %s\n\n", sim_config$X_approach))
 
 # ==============================================================================
 # PART 2: SETUP COMPARISONS
 # ==============================================================================
 
 cat("=== PART 2: SETUP COMPARISONS ===\n\n")
-cat(sprintf("Setting up folders for %d comparisons...\n", n_comp))
+cat(sprintf("Setting up folders for %d comparisons (each with unique z & d)...\n", n_comp))
 
-source("sim_functions/setup_functions.R")
-setup_comp(z_mean = truth, z_var = chosen_var, ncomps = n_comp, results_dir = sim_config$results_dir)
-setup_esim(w_var = chosen_var, ncomps = n_comp, results_dir = sim_config$results_dir)
+source("sim_functions/sampling_and_setup.R")
+setup_comp(ncomps = n_comp, results_dir = sim_config$results_dir)
+setup_esim(ncomps = n_comp, results_dir = sim_config$results_dir)
 
-cat("✓ Comparison folders created\n\n")
+cat("✓ Comparison folders created with design-based variances\n\n")
 
 # ==============================================================================
 # PART 3: RUN METHODS
@@ -145,72 +116,81 @@ cat("===========================================================================
 cat("=== PART 3: RUN MODEL SELECTION METHODS ===\n")
 cat("================================================================================\n\n")
 
-#-------------------------------------------------------------------------------
-cat("--- METHOD 1: ZFIT (Oracle fits with true means) ---\n")
-cat(sprintf("Expected time: ~10-12 minutes for %d comparisons (3 models each)\n\n", n_comp))
+# ==============================================================================
+# METHOD 1: FULL DATA FIT (Oracle - fit on observed z, evaluate on true means)
+# ==============================================================================
+# COMMENTED OUT: Spatial model not yet implemented
+# Will uncomment when models/spatial_basis_fit.R is ready
+#
+# #-------------------------------------------------------------------------------
+# cat("--- METHOD 1: FULL DATA FIT (Oracle fits) ---\n")
+# cat(sprintf("Expected time: ~10-12 minutes for %d comparisons (3 models each)\n\n", n_comp))
+#
+# source("sim_functions/full_data_fit.R")
+# timer <- proc.time()
+# options(digits.secs = 0)
+# cat(sprintf("Start time: %s\n", Sys.time()))
+#
+# cl <- makeForkCluster(n_cores)
+# registerDoParallel(cl)
+# cat(sprintf("Using %d cores\n\n", length(cl)))
+#
+# foreach(j = 1:n_comp) %dopar% {
+#   tryCatch(
+#     {
+#       full_data_fit(j, sim_config$results_dir)  # Updated signature
+#       print(paste0("✓ Full data fit comparison #", j, " completed"))
+#     },
+#     error = function(e) {
+#       message(sprintf("✗ Error in comparison %d: %s", j, e$message))
+#       error_file <- file.path(sim_config$results_dir, sprintf("comparison_%03d_fit_ERROR.RDS", j))
+#       saveRDS(list(comp_no = j, error = e$message, traceback = capture.output(traceback())),
+#         file = error_file
+#       )
+#       return(NULL)
+#     }
+#   )
+# }
+#
+# stopCluster(cl)
+# elapsed <- (proc.time() - timer)[3]
+# cat(sprintf("\n✓ Full data fit completed in %.1f minutes\n", elapsed / 60))
+#
+# # Preview results
+# source("sim_functions/summary_oracle.R")
+# cl <- makeForkCluster(n_cores)
+# zfit_res <- parLapply(
+#   cl, 1:n_comp,
+#   function(x) {
+#     summary_oracle(x, sim_config$results_dir) %>%  # Updated signature
+#       group_by(comp_no) %>%
+#       mutate(mse_true_rank = rank(mse_true))
+#   }
+# ) %>% bind_rows()
+# stopCluster(cl)
+#
+# cat("\nTop model selections (by true MSE):\n")
+# zfit_res %>%
+#   filter(mse_true_rank == 1) %>%
+#   group_by(model) %>%
+#   reframe(count = n()) %>%
+#   arrange(desc(count)) %>%
+#   rename(`True No.1 count` = count) %>%
+#   print()
+#
+# cat("\nAverage MSE by model:\n")
+# zfit_res %>%
+#   group_by(model) %>%
+#   reframe(true_mse = mean(mse_true)) %>%
+#   arrange(true_mse) %>%
+#   rename(Av_MSE = true_mse) %>%
+#   mutate(pct_diff = 100 * (Av_MSE - first(Av_MSE)) / first(Av_MSE)) %>%
+#   print()
+# cat("\n")
+# cat(sprintf("\n========================================\n"))
 
-source("sim_functions/zfit.R")
-timer <- proc.time()
-options(digits.secs = 0)
-cat(sprintf("Start time: %s\n", Sys.time()))
-
-cl <- makeForkCluster(n_cores)
-registerDoParallel(cl)
-cat(sprintf("Using %d cores\n\n", length(cl)))
-
-foreach(j = 1:n_comp) %dopar% {
-  tryCatch(
-    {
-      zfit(j, chosen_var, all_covs, all_data, sim_config$results_dir)
-      print(paste0("✓ ZFIT comparison #", j, " completed"))
-    },
-    error = function(e) {
-      message(sprintf("✗ Error in ZFIT comparison %d: %s", j, e$message))
-      error_file <- file.path(sim_config$results_dir, sprintf("comparison_%03d_zfit_ERROR.RDS", j))
-      saveRDS(list(comp_no = j, error = e$message, traceback = capture.output(traceback())),
-        file = error_file
-      )
-      return(NULL)
-    }
-  )
-}
-
-stopCluster(cl)
-elapsed <- (proc.time() - timer)[3]
-cat(sprintf("\n✓ ZFIT completed in %.1f minutes\n", elapsed / 60))
-
-# Preview ZFIT results
-source("sim_functions/summary_zfit.R")
-cl <- makeForkCluster(n_cores)
-zfit_res <- parLapply(
-  cl, 1:n_comp,
-  function(x) {
-    summary_zfit(x, truth, chosen_var, all_covs, sim_config$results_dir) %>%
-      group_by(comp_no) %>%
-      mutate(mse_true_rank = rank(mse_true))
-  }
-) %>% bind_rows()
-stopCluster(cl)
-
-cat("\nTop model selections (by true MSE):\n")
-zfit_res %>%
-  filter(mse_true_rank == 1) %>%
-  group_by(model) %>%
-  reframe(count = n()) %>%
-  arrange(desc(count)) %>%
-  rename(`True No.1 count` = count) %>%
-  print()
-
-cat("\nAverage MSE by model:\n")
-zfit_res %>%
-  group_by(model) %>%
-  reframe(true_mse = mean(mse_true)) %>%
-  arrange(true_mse) %>%
-  rename(Av_MSE = true_mse) %>%
-  mutate(pct_diff = 100 * (Av_MSE - first(Av_MSE)) / first(Av_MSE)) %>%
-  print()
-cat("\n")
-cat(sprintf("\n========================================\n"))
+cat("⚠ Skipping METHOD 1 (Full Data Fit) - spatial model not yet implemented\n")
+cat(sprintf("========================================\n\n"))
 
 #-------------------------------------------------------------------------------
 cat("--- METHOD 2: DT 1-FOLD (Data Thinning - Single Fold) ---\n")
@@ -255,8 +235,8 @@ for (eps in epsilon_values) {
         {
           source("sim_functions/run_dt.R")
           run_dt(
-            comp_no = comp, k = 1, s = chosen_var, all_covs = all_covs,
-            all_data = all_data, results_dir = sim_config$results_dir,
+            comp_no = comp, k = 1,
+            results_dir = sim_config$results_dir,
             eps = eps, n_reps = n_reps
           )
         },
@@ -297,8 +277,8 @@ foreach(comp = 1:n_comp) %dopar% {
     {
       source("sim_functions/run_dt.R")
       run_dt(
-        comp_no = comp, k = 5, s = chosen_var, all_covs = all_covs,
-        all_data = all_data, results_dir = sim_config$results_dir
+        comp_no = comp, k = 5,
+        results_dir = sim_config$results_dir
       )
       print(paste0("✓ DT 5-fold comparison #", comp, " completed"))
     },
@@ -339,8 +319,8 @@ foreach(comp = 1:n_comp) %dopar% {
     {
       source("sim_functions/run_esim.R")
       run_esim(comp,
-        s = chosen_var, all_covs, n_cores = 1,
-        all_data = all_data, results_dir = sim_config$results_dir, n_iters = 100
+        n_cores = 1,
+        results_dir = sim_config$results_dir, n_iters = 100
       )
       print(paste0("✓ ESIM comparison #", comp, " completed"))
     },
@@ -390,8 +370,8 @@ for (eps in epsilon_values) {
         function(x, cfg) {
           source("sim_functions/summary_dt.R")
           summary_dt(x,
-            n_folds = 1, cfg$chosen_var, loss_function = cfg$loss,
-            all_data = cfg$all_data, results_dir = cfg$results_dir,
+            n_folds = 1, loss_function = cfg$loss,
+            results_dir = cfg$results_dir,
             n_reps_to_use = cfg$n_reps, eps = cfg$eps
           ) %>%
             group_by(comp_no) %>%
@@ -405,7 +385,6 @@ for (eps in epsilon_values) {
         },
         cfg = list(
           eps = eps, n_reps = n_reps, loss = loss,
-          chosen_var = chosen_var, all_data = all_data,
           results_dir = sim_config$results_dir
         )
       ) %>% bind_rows()
@@ -427,8 +406,8 @@ for (loss in loss_functions) {
     function(x, cfg) {
       source("sim_functions/summary_dt.R")
       summary_dt(x,
-        n_folds = 5, cfg$chosen_var, loss_function = cfg$loss,
-        all_data = cfg$all_data, results_dir = cfg$results_dir,
+        n_folds = 5, loss_function = cfg$loss,
+        results_dir = cfg$results_dir,
         n_reps_to_use = 1
       ) %>%
         group_by(comp_no) %>%
@@ -439,8 +418,7 @@ for (loss in loss_functions) {
         )
     },
     cfg = list(
-      loss = loss, chosen_var = chosen_var,
-      all_data = all_data, results_dir = sim_config$results_dir
+      loss = loss, results_dir = sim_config$results_dir
     )
   ) %>%
     bind_rows()
@@ -459,10 +437,9 @@ summary_timer <- proc.time()
 
 esim_standard <- parLapply(
   cl, 1:n_comp,
-  function(x) {
+  function(x, cfg) {
     summary_esim(x,
-      all_data = all_data,
-      results_dir = sim_config$results_dir,
+      results_dir = cfg$results_dir,
       validation = "standard"
     ) %>%
       group_by(comp_no) %>%
@@ -471,15 +448,15 @@ esim_standard <- parLapply(
         method_name = "esim_standard",
         loss_function = NA
       )
-  }
+  },
+  cfg = list(results_dir = sim_config$results_dir)
 ) %>% bind_rows()
 
 esim_fission <- parLapply(
   cl, 1:n_comp,
-  function(x) {
+  function(x, cfg) {
     summary_esim(x,
-      all_data = all_data,
-      results_dir = sim_config$results_dir,
+      results_dir = cfg$results_dir,
       validation = "data_fission"
     ) %>%
       group_by(comp_no) %>%
@@ -488,7 +465,8 @@ esim_fission <- parLapply(
         method_name = "esim_fission",
         loss_function = NA
       )
-  }
+  },
+  cfg = list(results_dir = sim_config$results_dir)
 ) %>% bind_rows()
 
 cat(sprintf("✓ Completed in %.1f seconds\n\n", (proc.time() - summary_timer)[3]))
@@ -497,189 +475,194 @@ cat(sprintf("✓ Completed in %.1f seconds\n\n", (proc.time() - summary_timer)[3
 esim_results <- bind_rows(esim_standard, esim_fission)
 
 #-------------------------------------------------------------------------------
-# Process ZFIT results computed earlier
-cat("Processing ZFIT results...\n")
-zfit_results <- zfit_res %>%
-  mutate(
-    method_name = "zfit",
-    loss_function = NA
-  )
+# ZFIT results and performance evaluation COMMENTED OUT (model not ready)
+# Will uncomment when spatial model is implemented
+#
+# # Process ZFIT results computed earlier
+# cat("Processing ZFIT results...\n")
+# zfit_results <- zfit_res %>%
+#   mutate(
+#     method_name = "zfit",
+#     loss_function = NA
+#   )
 
 stopCluster(cl)
 
+cat("\n⚠ Skipping performance evaluation - depends on full data fit (not yet implemented)\n\n")
+
 # ===============================================================================
-# MODEL SELECTION PERFORMANCE PREVIEW
+# PERFORMANCE EVALUATION (COMMENTED OUT - depends on zfit_results)
 # ===============================================================================
+#
+# cat("\n================================================================================\n")
+# cat("=== MODEL SELECTION PERFORMANCE PREVIEW ===\n")
+# cat("================================================================================\n\n")
 
-cat("\n================================================================================\n")
-cat("=== MODEL SELECTION PERFORMANCE PREVIEW ===\n")
-cat("================================================================================\n\n")
-
-# Get oracle best model for each comparison (lowest oracle MSE)
-oracle_best <- zfit_results %>%
-  select(comp_no, model, mse_true) %>%
-  group_by(comp_no) %>%
-  slice_min(mse_true, n = 1, with_ties = FALSE) %>%
-  select(comp_no, best_model = model)
-
-# Function to compute selection accuracy and Kendall's Tau
-compute_performance <- function(data, oracle) {
-  # Get all models that exist in oracle (1_cov, 4_cov, 7_cov)
-  # This excludes ESIM's "Direct" model
-  oracle_all_models <- unique(zfit_results$model)
-
-  # Filter to models that exist in oracle
-  data_filtered <- data %>%
-    filter(model %in% oracle_all_models)
-
-  # ACCURACY: Count how many times method selects same model as per-comparison oracle
-  selections <- data_filtered %>%
-    group_by(comp_no) %>%
-    slice_min(metric, n = 1, with_ties = FALSE) %>%
-    ungroup()
-
-  # Join with oracle to compare selections
-  accuracy <- selections %>%
-    left_join(oracle, by = "comp_no") %>%
-    summarise(correct = sum(model == best_model, na.rm = TRUE)) %>%
-    pull(correct)
-
-  # Compute Kendall's Tau
-  # Compare to per-comparison oracle ranks
-  oracle_ranks <- zfit_results %>%
-    select(comp_no, model, oracle_rank = mse_true_rank) %>%
-    arrange(comp_no, model)
-
-  method_ranks <- data %>%
-    filter(model %in% oracle_all_models) %>%
-    select(comp_no, model, rank) %>%
-    arrange(comp_no, model)
-
-  combined <- method_ranks %>%
-    left_join(oracle_ranks, by = c("comp_no", "model"))
-
-  # Compute tau for each comparison separately, then average
-  per_comp_tau <- combined %>%
-    group_by(comp_no) %>%
-    summarise(tau = cor(rank, oracle_rank, method = "kendall"), .groups = "drop")
-
-  tau <- mean(per_comp_tau$tau, na.rm = TRUE)
-
-  return(list(accuracy = accuracy, tau = tau))
-}
-
-# Combine all results for performance evaluation
-all_results_temp <- bind_rows(
-  dt_results,
-  esim_results,
-  zfit_results %>%
-    select(comp_no, model, DIC, WAIC, mse_true_rank) %>%
-    pivot_longer(cols = c(DIC, WAIC), names_to = "metric_type", values_to = "metric") %>%
-    group_by(comp_no, metric_type) %>%
-    mutate(
-      rank = rank(metric),
-      method_name = "zfit",
-      loss_function = NA
-    ) %>%
-    select(comp_no, method_name, loss_function, model, metric, rank, metric_type)
-)
-
-# Compute for all DT 1-fold configurations
-dt1_performance <- all_results_temp %>%
-  filter(method_name == "dt_1fold") %>%
-  group_by(epsilon, n_reps_used, loss_function) %>%
-  group_modify(~ {
-    perf <- compute_performance(.x, oracle_best)
-    tibble(accuracy = perf$accuracy, tau = perf$tau)
-  }) %>%
-  ungroup() %>%
-  arrange(desc(accuracy), desc(tau))
-
-# Compute for DT 5-fold
-dt5_performance <- all_results_temp %>%
-  filter(method_name == "dt_5fold") %>%
-  group_by(loss_function) %>%
-  group_modify(~ {
-    perf <- compute_performance(.x, oracle_best)
-    tibble(accuracy = perf$accuracy, tau = perf$tau)
-  }) %>%
-  ungroup() %>%
-  arrange(desc(accuracy), desc(tau))
-
-# Compute for ESIM
-esim_performance <- all_results_temp %>%
-  filter(method_name %in% c("esim_standard", "esim_fission")) %>%
-  group_by(method_name) %>%
-  group_modify(~ {
-    perf <- compute_performance(.x, oracle_best)
-    tibble(accuracy = perf$accuracy, tau = perf$tau)
-  }) %>%
-  ungroup() %>%
-  arrange(desc(accuracy), desc(tau))
-
-# Compute for full-data methods (DIC, WAIC)
-zfit_performance <- all_results_temp %>%
-  filter(method_name == "zfit", metric_type %in% c("DIC", "WAIC")) %>%
-  group_by(metric_type) %>%
-  group_modify(~ {
-    perf <- compute_performance(.x, oracle_best)
-    tibble(accuracy = perf$accuracy, tau = perf$tau)
-  }) %>%
-  ungroup() %>%
-  mutate(
-    method_label = case_when(
-      metric_type == "DIC" ~ "DIC",
-      metric_type == "WAIC" ~ "WAIC",
-      TRUE ~ metric_type
-    )
-  ) %>%
-  select(method = method_label, accuracy, tau) %>%
-  arrange(desc(accuracy), desc(tau))
-
-# Combined summary sorted by performance
-cat("\n================================================================================\n")
-# Compute method counts dynamically
-dt1_methods <- length(epsilon_values) * length(repeat_counts) * length(loss_functions)
-dt5_methods <- length(loss_functions)
-esim_methods <- 2
-zfit_methods <- 2 # DIC, WAIC
-total_methods <- dt1_methods + dt5_methods + esim_methods + zfit_methods
-cat(sprintf(
-  "=== OVERALL RANKING (all %d methods, sorted by accuracy) ===\n",
-  total_methods
-))
-cat("================================================================================\n\n")
-
-overall_summary <- bind_rows(
-  dt1_performance %>%
-    mutate(method = sprintf(
-      "DT 1-fold (ε=%.2f, reps=%d, %s)",
-      epsilon, n_reps_used, loss_function
-    )) %>%
-    select(method, accuracy, tau),
-  dt5_performance %>%
-    mutate(method = sprintf("DT 5-fold (%s)", loss_function)) %>%
-    select(method, accuracy, tau),
-  esim_performance %>%
-    mutate(method = ifelse(method_name == "esim_standard",
-      "ESIM (standard)", "ESIM (data fission)"
-    )) %>%
-    select(method, accuracy, tau),
-  zfit_performance # Already has method, accuracy, tau columns with proper names
-) %>%
-  arrange(desc(accuracy), desc(tau))
-
-print(overall_summary, n = 100)
-
-cat("\n")
-cat(sprintf("Best performing method: %s\n", overall_summary$method[1]))
-cat(sprintf(
-  "  Accuracy: %d/%d (%.1f%%)\n",
-  overall_summary$accuracy[1], n_comp,
-  100 * overall_summary$accuracy[1] / n_comp
-))
-cat(sprintf("  Kendall's Tau: %.3f\n", overall_summary$tau[1]))
-cat("\n")
+# # Get oracle best model for each comparison (lowest oracle MSE)
+# oracle_best <- zfit_results %>%
+#   select(comp_no, model, mse_true) %>%
+#   group_by(comp_no) %>%
+#   slice_min(mse_true, n = 1, with_ties = FALSE) %>%
+#   select(comp_no, best_model = model)
+#
+# # Function to compute selection accuracy and Kendall's Tau
+# compute_performance <- function(data, oracle) {
+#   # Get all models that exist in oracle (1_cov, 4_cov, 7_cov)
+#   # This excludes ESIM's "Direct" model
+#   oracle_all_models <- unique(zfit_results$model)
+#
+#   # Filter to models that exist in oracle
+#   data_filtered <- data %>%
+#     filter(model %in% oracle_all_models)
+#
+#   # ACCURACY: Count how many times method selects same model as per-comparison oracle
+#   selections <- data_filtered %>%
+#     group_by(comp_no) %>%
+#     slice_min(metric, n = 1, with_ties = FALSE) %>%
+#     ungroup()
+#
+#   # Join with oracle to compare selections
+#   accuracy <- selections %>%
+#     left_join(oracle, by = "comp_no") %>%
+#     summarise(correct = sum(model == best_model, na.rm = TRUE)) %>%
+#     pull(correct)
+#
+#   # Compute Kendall's Tau
+#   # Compare to per-comparison oracle ranks
+#   oracle_ranks <- zfit_results %>%
+#     select(comp_no, model, oracle_rank = mse_true_rank) %>%
+#     arrange(comp_no, model)
+#
+#   method_ranks <- data %>%
+#     filter(model %in% oracle_all_models) %>%
+#     select(comp_no, model, rank) %>%
+#     arrange(comp_no, model)
+#
+#   combined <- method_ranks %>%
+#     left_join(oracle_ranks, by = c("comp_no", "model"))
+#
+#   # Compute tau for each comparison separately, then average
+#   per_comp_tau <- combined %>%
+#     group_by(comp_no) %>%
+#     summarise(tau = cor(rank, oracle_rank, method = "kendall"), .groups = "drop")
+#
+#   tau <- mean(per_comp_tau$tau, na.rm = TRUE)
+#
+#   return(list(accuracy = accuracy, tau = tau))
+# }
+#
+# # Combine all results for performance evaluation
+# all_results_temp <- bind_rows(
+#   dt_results,
+#   esim_results,
+#   zfit_results %>%
+#     select(comp_no, model, DIC, WAIC, mse_true_rank) %>%
+#     pivot_longer(cols = c(DIC, WAIC), names_to = "metric_type", values_to = "metric") %>%
+#     group_by(comp_no, metric_type) %>%
+#     mutate(
+#       rank = rank(metric),
+#       method_name = "zfit",
+#       loss_function = NA
+#     ) %>%
+#     select(comp_no, method_name, loss_function, model, metric, rank, metric_type)
+# )
+#
+# # Compute for all DT 1-fold configurations
+# dt1_performance <- all_results_temp %>%
+#   filter(method_name == "dt_1fold") %>%
+#   group_by(epsilon, n_reps_used, loss_function) %>%
+#   group_modify(~ {
+#     perf <- compute_performance(.x, oracle_best)
+#     tibble(accuracy = perf$accuracy, tau = perf$tau)
+#   }) %>%
+#   ungroup() %>%
+#   arrange(desc(accuracy), desc(tau))
+#
+# # Compute for DT 5-fold
+# dt5_performance <- all_results_temp %>%
+#   filter(method_name == "dt_5fold") %>%
+#   group_by(loss_function) %>%
+#   group_modify(~ {
+#     perf <- compute_performance(.x, oracle_best)
+#     tibble(accuracy = perf$accuracy, tau = perf$tau)
+#   }) %>%
+#   ungroup() %>%
+#   arrange(desc(accuracy), desc(tau))
+#
+# # Compute for ESIM
+# esim_performance <- all_results_temp %>%
+#   filter(method_name %in% c("esim_standard", "esim_fission")) %>%
+#   group_by(method_name) %>%
+#   group_modify(~ {
+#     perf <- compute_performance(.x, oracle_best)
+#     tibble(accuracy = perf$accuracy, tau = perf$tau)
+#   }) %>%
+#   ungroup() %>%
+#   arrange(desc(accuracy), desc(tau))
+#
+# # Compute for full-data methods (DIC, WAIC)
+# zfit_performance <- all_results_temp %>%
+#   filter(method_name == "zfit", metric_type %in% c("DIC", "WAIC")) %>%
+#   group_by(metric_type) %>%
+#   group_modify(~ {
+#     perf <- compute_performance(.x, oracle_best)
+#     tibble(accuracy = perf$accuracy, tau = perf$tau)
+#   }) %>%
+#   ungroup() %>%
+#   mutate(
+#     method_label = case_when(
+#       metric_type == "DIC" ~ "DIC",
+#       metric_type == "WAIC" ~ "WAIC",
+#       TRUE ~ metric_type
+#     )
+#   ) %>%
+#   select(method = method_label, accuracy, tau) %>%
+#   arrange(desc(accuracy), desc(tau))
+#
+# # Combined summary sorted by performance
+# cat("\n================================================================================\n")
+# # Compute method counts dynamically
+# dt1_methods <- length(epsilon_values) * length(repeat_counts) * length(loss_functions)
+# dt5_methods <- length(loss_functions)
+# esim_methods <- 2
+# zfit_methods <- 2 # DIC, WAIC
+# total_methods <- dt1_methods + dt5_methods + esim_methods + zfit_methods
+# cat(sprintf(
+#   "=== OVERALL RANKING (all %d methods, sorted by accuracy) ===\n",
+#   total_methods
+# ))
+# cat("================================================================================\n\n")
+#
+# overall_summary <- bind_rows(
+#   dt1_performance %>%
+#     mutate(method = sprintf(
+#       "DT 1-fold (ε=%.2f, reps=%d, %s)",
+#       epsilon, n_reps_used, loss_function
+#     )) %>%
+#     select(method, accuracy, tau),
+#   dt5_performance %>%
+#     mutate(method = sprintf("DT 5-fold (%s)", loss_function)) %>%
+#     select(method, accuracy, tau),
+#   esim_performance %>%
+#     mutate(method = ifelse(method_name == "esim_standard",
+#       "ESIM (standard)", "ESIM (data fission)"
+#     )) %>%
+#     select(method, accuracy, tau),
+#   zfit_performance # Already has method, accuracy, tau columns with proper names
+# ) %>%
+#   arrange(desc(accuracy), desc(tau))
+#
+# print(overall_summary, n = 100)
+#
+# cat("\n")
+# cat(sprintf("Best performing method: %s\n", overall_summary$method[1]))
+# cat(sprintf(
+#   "  Accuracy: %d/%d (%.1f%%)\n",
+#   overall_summary$accuracy[1], n_comp,
+#   100 * overall_summary$accuracy[1] / n_comp
+# ))
+# cat(sprintf("  Kendall's Tau: %.3f\n", overall_summary$tau[1]))
+# cat("\n")
 
 # ==============================================================================
 # PART 5: SAVE RESULTS
@@ -689,40 +672,26 @@ cat("===========================================================================
 cat("=== PART 5: SAVE RESULTS ===\n")
 cat("================================================================================\n\n")
 
-# Combine all results into single unified structure
-cat("Creating unified results structure...\n")
+# Combine DT and ESIM results (zfit not available yet)
+cat("Saving DT and ESIM results...\n")
 
 all_results <- bind_rows(
-  dt_results %>% select(comp_no, method_name, loss_function, model, metric, rank, method, metric_type, epsilon, n_reps_used),
-  esim_results %>% select(comp_no, method_name, loss_function, model, metric, rank, method, metric_type),
-  zfit_results %>% select(comp_no, method_name, loss_function, model, mse_true, DIC, WAIC, mse_true_rank) %>%
-    pivot_longer(cols = c(mse_true, DIC, WAIC), names_to = "metric_type", values_to = "metric") %>%
-    mutate(
-      method = case_when(
-        metric_type == "mse_true" ~ "Oracle MSE (per-comp)",
-        metric_type == "DIC" ~ "DIC",
-        metric_type == "WAIC" ~ "WAIC",
-        TRUE ~ metric_type
-      )
-    ) %>%
-    group_by(comp_no, metric_type) %>%
-    mutate(rank = rank(metric)) %>%
-    select(comp_no, method_name, loss_function, model, metric, rank, method, metric_type)
+  dt_results,
+  esim_results
 )
 
 cat("Saving results to results.RDS...\n")
 saveRDS(all_results, "results.RDS")
 
-# Save performance metrics
+# Save individual method results for easier access
 results_list <- list(
-  dt1_performance = dt1_performance,
-  dt5_performance = dt5_performance,
-  esim_performance = esim_performance,
-  zfit_performance = zfit_performance
+  dt_results = dt_results,
+  esim_results = esim_results
 )
 saveRDS(results_list, "results_list.RDS")
 
-cat("\n✓ Results saved successfully!\n\n")
+cat("\n✓ Results saved successfully!\n")
+cat("  Note: Full data fit results not included (model not yet implemented)\n\n")
 
 # ==============================================================================
 # SAVE ARCHIVED COPY (if SAVE_AS is set)

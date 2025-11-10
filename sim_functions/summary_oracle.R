@@ -42,22 +42,31 @@ calc_WAIC <- function(theta_samples, z, d){
 
 # wrapper function to help create the resulting table
 # calculates true MSE, WAIC, DIC and puts them into one table
-summary_zfit <- function(comp_no, truth, d, all_covs, results_dir){
+summary_oracle <- function(comp_no, results_dir){
   comp_folder = file.path(getwd(), results_dir, sprintf("comparison_%03d", comp_no))
-  post_samples = readRDS(file.path(comp_folder, "fit_on_z", "chains.RDS"))
-  z = readRDS(file.path(comp_folder, "z.RDS"))
+  all_results = readRDS(file.path(comp_folder, "fit_on_z", "chains.RDS"))
+
+  # Load comparison-specific estimates and variances (new list format)
+  z_data = readRDS(file.path(comp_folder, "z.RDS"))
+  d_data = readRDS(file.path(comp_folder, "d.RDS"))
+
+  z = z_data$values
+  d = d_data$values
+
+  # Extract chains from new structure
+  post_samples <- lapply(all_results, function(x) x$chain$theta)
 
   # Only 3 models: 1, 4, 7 covariates
   cov_counts <- c(1, 4, 7)
 
   # workaround for adding in direct estimate
   estimates = sapply(post_samples, function(x){x %>% colMeans()})
-  estimates = cbind(estimates, z %>% t())
+  estimates = cbind(estimates, z)
 
   mse_df = data.frame(comp_no=comp_no,
                       model=c(paste0(cov_counts, "_cov_model"), "D.Est"),
                       no_covs = c(cov_counts, NA),
-                            mse_true=colMeans((estimates-truth)^2))
+                            mse_true=colMeans((estimates-z)^2))
   waic_df = data.frame(comp_no=comp_no,
                       model=c(paste0(cov_counts, "_cov_model")),
                       no_covs = cov_counts,
@@ -74,5 +83,8 @@ summary_zfit <- function(comp_no, truth, d, all_covs, results_dir){
 
   return(summary_df)
 }
+
+# Alias for backward compatibility
+summary_zfit <- summary_oracle
 
 

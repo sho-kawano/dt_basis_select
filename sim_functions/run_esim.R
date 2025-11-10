@@ -5,13 +5,22 @@ library(tidyverse)
 library(Matrix)
 #library(rstan)
 
-#(comp_no, k, s, cov_names)
 # runs empirical simulation study for comparison # `comp_no`
-run_esim <- function(comp_no, s, all_covs, n_cores, all_data, results_dir, n_iters=100){
+run_esim <- function(comp_no, n_cores, results_dir, n_iters=100){
 
   # ---- set up ----
   # folder where the comparison is stored
   comp_folder = file.path(getwd(), results_dir, sprintf("comparison_%03d", comp_no))
+
+  # Load comparison-specific data (X, d)
+  X_data <- readRDS(file.path(comp_folder, "X.RDS"))
+  d_data <- readRDS(file.path(comp_folder, "d.RDS"))
+
+  # Extract values
+  puma_ids <- X_data$puma
+  X_df <- X_data$X  # Data frame with predictor columns
+  d_var <- d_data$values
+  predictor_names <- colnames(X_df)
 
   # load sampler
   source("models/fh_fit.R")
@@ -41,21 +50,22 @@ run_esim <- function(comp_no, s, all_covs, n_cores, all_data, results_dir, n_ite
       w = readRDS(file.path(sub_folder, "w.RDS")) %>% as.numeric()
 
       # save the direct estimate to results
-      results[[1]] = data.frame(domain=all_data$fips, mean=w,
-                            median=NA, var=s, lower=NA, upper=NA, method="Direct")
+      results[[1]] = data.frame(domain=puma_ids, mean=w,
+                            median=NA, var=d_var, lower=NA, upper=NA, method="Direct")
 
       # run each of the models - save results
       for(i in seq_along(cov_counts)){
         ncovs <- cov_counts[i]
-        X = model.matrix(~., all_data[, all_covs[1:ncovs], drop=F])
+        X = model.matrix(~., X_df[, predictor_names[1:ncovs], drop=F])
 
         # Set unique seed for each model fit: varies by comparison, iteration, and model
         set.seed(comp_no * 10000 + iter * 10 + ncovs)
-        fh_chain = fh_fit(X, w, s, ndesired=1000, nburn=10000, nthin=1, verbose=F)
+        # Using minimal iterations for testing - increase for production
+        fh_chain = fh_fit(X, w, d_var, ndesired=10, nburn=10, nthin=1, verbose=F)
 
         results[[i+1]] = fh_chain %>%
           mcmc_summary("theta", paste0(ncovs, "_cov_model")) %>%
-          mutate(domain=all_data$fips) %>%
+          mutate(domain=puma_ids) %>%
           relocate(domain)
       }
 
@@ -90,21 +100,22 @@ run_esim <- function(comp_no, s, all_covs, n_cores, all_data, results_dir, n_ite
         w = readRDS(file.path(sub_folder, "w.RDS")) %>% as.numeric()
 
         # save the direct estimate to results
-        results[[1]] = data.frame(domain=all_data$fips, mean=w,
-                              median=NA, var=s, lower=NA, upper=NA, method="Direct")
+        results[[1]] = data.frame(domain=puma_ids, mean=w,
+                              median=NA, var=d_var, lower=NA, upper=NA, method="Direct")
 
         # run each of the models - save results
         for(i in seq_along(cov_counts)){
           ncovs <- cov_counts[i]
-          X = model.matrix(~., all_data[, all_covs[1:ncovs], drop=F])
+          X = model.matrix(~., X_df[, predictor_names[1:ncovs], drop=F])
 
           # Set unique seed for each model fit: varies by comparison, iteration, and model
           set.seed(comp_no * 10000 + iter * 10 + ncovs)
-          fh_chain = fh_fit(X, w, s, ndesired=1000, nburn=10000, nthin=1, verbose=F)
+          # Using minimal iterations for testing - increase for production
+          fh_chain = fh_fit(X, w, d_var, ndesired=10, nburn=10, nthin=1, verbose=F)
 
           results[[i+1]] = fh_chain %>%
             mcmc_summary("theta", paste0(ncovs, "_cov_model")) %>%
-            mutate(domain=all_data$fips) %>%
+            mutate(domain=puma_ids) %>%
             relocate(domain)
         }
 
