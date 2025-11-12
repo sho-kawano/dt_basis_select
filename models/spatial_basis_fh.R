@@ -5,31 +5,16 @@ library(dplyr)
 source("models/mcmc_helper.R")
 
 #' Description: Spatial Basis Function Fay-Herriot Model with IID + Spatial Random Effects (BYM-style)
-#'
-#' Model: theta_i = X_i'beta + v_i + w_i
-#'        v = S * eta, eta ~ N(0, tau^2 I_r) [spatial via basis functions]
-#'        w ~ N(0, sigma^2 I_m) [IID random effects]
-#'
-#' Dimensions:
-#'   X: m × p (covariates, includes intercept)
-#'   S: m × r (spatial basis functions, r < m)
-#'   Z = [X S]: m × (p+r) (augmented design)
-#'   gamma = (beta', eta')': (p+r) × 1 (joint parameter)
-#'   w: m × 1 (IID random effects)
-#'   v = S*eta: m × 1 (spatial random effects)
-#'   theta = Z*gamma + w: m × 1 (area parameters)
-#'
 #' @param X the covariates (from model.matrix, include intercept)
 #' @param y the response
 #' @param d.var known sample *variances*
 #' @param nbasis number of spatial basis functions to use (required)
-#' @param eig_moran (Optional) pre-computed eigendecomposition of Moran's I operator.
-#'   Should be a list with $values and $vectors from eigen(). If provided, A is not needed.
+#' @param eig_moran (Optional) pre-computed eigendecomposition of Moran's I operator. Ouput from `compute_moran_eigen`
 #' @param A adjacency matrix (required only if eig_moran not provided)
 #' @param ndesired desired size of MCMC sample
 #' @param nburn # of burn in iterations
-#' @param nthin how many iterations to thin by
-#' @param hyp (Optional) list of the hyperparameters
+#' @param nthin (Optional) how many iterations to thin by
+#' @param hyp (Optional) list of the hyperparameters for IG priors (default is IG(2, 0.25))
 #'   - c, d: hyperparameters for sigma^2 ~ IG(c, d) [IID variance]
 #'   - a, b: hyperparameters for tau^2 ~ IG(a, b) [spatial variance]
 #' @param ini (Optional) list of the initial values for any of the parameters
@@ -37,7 +22,7 @@ source("models/mcmc_helper.R")
 #' @returns list of MCMC containers (matrices) for each set of parameters
 
 spatial_basis_fh <- function(X, y, d.var, nbasis, eig_moran = NULL, A = NULL,
-                             ndesired, nburn, nthin,
+                             ndesired, nburn, nthin = 1,
                              hyp = list(), ini = list(), verbose = TRUE) {
   nsim <- nthin * ndesired
   m <- nrow(X) # number of areas
@@ -56,15 +41,17 @@ spatial_basis_fh <- function(X, y, d.var, nbasis, eig_moran = NULL, A = NULL,
   S <- select_basis_from_eigen(eig_moran, nbasis)
   r <- ncol(S) # actual number of basis functions
 
+  # ---- Construct augmented design matrix (fixed across iterations) ----
+  Z <- cbind(X, S) # Z = [X  S], dimension m × (p+r)
+
   # ---- Hyperparameters for variance priors ----
-  # Data-dependent priors (standard SAE practice)
   # sigma^2 ~ IG(c, d) for IID effects w
-  c <- ifelse(is.null(hyp$c), 3, hyp$c)
-  d <- ifelse(is.null(hyp$d), 2 * mean(d.var), hyp$d)
+  c <- ifelse(is.null(hyp$c), 2, hyp$c)
+  d <- ifelse(is.null(hyp$d), 0.25, hyp$d)
 
   # tau^2 ~ IG(a, b) for spatial basis coefficients eta
-  a <- ifelse(is.null(hyp$a), 3, hyp$a)
-  b <- ifelse(is.null(hyp$b), 2 * mean(d.var), hyp$b)
+  a <- ifelse(is.null(hyp$a), 2, hyp$a)
+  b <- ifelse(is.null(hyp$b), 0.25, hyp$b)
 
   details <- paste0(
     "Priors: sigma^2 ~ IG(", c, ", ", d, "); ",
@@ -85,24 +72,20 @@ spatial_basis_fh <- function(X, y, d.var, nbasis, eig_moran = NULL, A = NULL,
   Res_theta <- mcmc_mat(nsim / nthin, m, paste0("theta_", 1:m))
 
   # ---- Initial values ----
+  # fixed effects
   ls_fit <- lm(y ~ X - 1)
-
-  # beta, eta (combined as gamma in joint sampling)
   beta <- if (is.null(ini$beta)) ls_fit$coefficients else ini$beta
-  eta <- if (is.null(ini$eta)) rnorm(r) else ini$eta
 
-  # IID random effects w
+  # spatial effects
+  eta <- if (is.null(ini$eta)) rnorm(r) else ini$eta
+  v <- as.numeric(S %*% eta)
+
+  # IID random effects
   w <- if (is.null(ini$w)) rnorm(m) else ini$w
 
   # Variance components
   sigma.sq <- if (is.null(ini$sigma.sq)) mean(ls_fit$residuals^2) else ini$sigma.sq
   tau.sq <- if (is.null(ini$tau.sq)) 1 else ini$tau.sq
-
-  # Derived: spatial effects v = S * eta
-  v <- as.numeric(S %*% eta)
-
-  # ---- Construct augmented design matrix (fixed across iterations) ----
-  Z <- cbind(X, S)  # Z = [X  S], dimension m × (p+r)
 
   # ---- Progress tracking ----
   if (verbose) {
@@ -128,7 +111,7 @@ spatial_basis_fh <- function(X, y, d.var, nbasis, eig_moran = NULL, A = NULL,
     a_vec <- crossprod(Z, (y - w) / d.var)
     b_vec <- rnorm(p + r)
 
-    # Sample gamma using Paciorek's method
+    # Sample gamma using https://www.stat.berkeley.edu/~paciorek/research/techVignettes/techVignette6.pdf
     gamma <- backsolve(U, backsolve(U, a_vec, transpose = TRUE) + b_vec)
 
     # Partition gamma into beta and eta
@@ -139,30 +122,25 @@ spatial_basis_fh <- function(X, y, d.var, nbasis, eig_moran = NULL, A = NULL,
     # ========================================
     # Step 2: Update w (IID random effects)
     # ========================================
-    # Compute Z*gamma (X*beta + S*eta)
-    Z_gamma <- as.numeric(Z %*% gamma)
-
     # Elementwise variance: s_i^2 = (d_i^{-1} + sigma^{-2})^{-1}
     var_w <- (d.var * sigma.sq) / (d.var + sigma.sq)
 
     # Elementwise mean: m_i = s_i^2 * (y_i - z_i'gamma) / d_i
-    mean_w <- var_w * (y - Z_gamma) / d.var
+    mean_w <- var_w * (y - Z %*% gamma) / d.var
 
     # Sample w elementwise
     w <- rnorm(m, mean = mean_w, sd = sqrt(var_w))
 
 
     # ========================================
-    # Step 3: Update sigma^2 (IID variance)
+    # Step 3: Update IID variance sigma^2 ~ IG(c + m/2, d + w'w/2)
     # ========================================
-    # sigma^2 ~ IG(c + m/2, d + w'w/2)
     sigma.sq <- 1 / rgamma(1, shape = c + m / 2, rate = d + sum(w^2) / 2)
 
 
     # ========================================
-    # Step 4: Update tau^2 (spatial variance)
+    # Step 4: Update spatial variance tau^2 ~ IG(a + r/2, b + eta'eta/2)
     # ========================================
-    # tau^2 ~ IG(a + r/2, b + eta'eta/2)
     tau.sq <- 1 / rgamma(1, shape = a + r / 2, rate = b + sum(eta^2) / 2)
 
 
