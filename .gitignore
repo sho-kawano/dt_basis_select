@@ -36,7 +36,7 @@ rerun_failed.R
 analysis_backup.Rmd
 
 # Personal notes and documentation PDFs
-Claude.md
+# Note: CLAUDE.md (uppercase) contains project instructions and IS tracked
 *.pdf
 main.tex
 
