@@ -77,8 +77,13 @@ validate_results.R
 run_summaries_only_old.R
 
 # Data files (but keep R scripts for reproducibility)
-data/*.csv        # Raw PUMS CSV files (~6GB)
-data/*.rds        # Generated population files (~60MB)
-data/*.RDA        # Generated adjacency matrices
+data/*.csv
+data/*.rds
+data/*.RDA
 data/*.txt
 data/*.zip
+
+# Additional cleanup patterns
+package-lock.json
+results.csv
+results/
