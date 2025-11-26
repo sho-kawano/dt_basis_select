@@ -33,49 +33,49 @@ results <- results %>%
 # Prepare data for each method
 # 1. Oracle (OD-Oracle MSE)
 oracle <- results %>%
-  filter(source == "oracle") %>%
-  select(comp_no, nbasis, value = mse_true) %>%
+  filter(method_name == "oracle") %>%
+  select(comp_no, nbasis, value = metric) %>%
   mutate(method = "OD-Oracle MSE")
 
 # 2. WAIC
 waic <- results %>%
-  filter(source == "oracle") %>%
-  select(comp_no, nbasis, value = WAIC) %>%
+  filter(method_name == "waic") %>%
+  select(comp_no, nbasis, value = metric) %>%
   mutate(method = "WAIC")
 
 # 3. DIC
 dic <- results %>%
-  filter(source == "oracle") %>%
-  select(comp_no, nbasis, value = DIC) %>%
+  filter(method_name == "dic") %>%
+  select(comp_no, nbasis, value = metric) %>%
   mutate(method = "DIC")
 
-# 4. DT 5-fold
+# 4. DT 5-fold (use MSE loss)
 dt5 <- results %>%
-  filter(source == "dt_5fold") %>%
+  filter(method_name == "dt_5fold", loss_function == "MSE") %>%
   select(comp_no, nbasis, value = metric) %>%
   mutate(method = "DT 5-fold")
 
-# 5. DT 1-fold (eps=0.3)
+# 5. DT 1-fold (eps=0.3, 3 reps, MSE loss)
 dt1_03 <- results %>%
-  filter(source == "dt_1fold", eps == 0.3) %>%
+  filter(method_name == "dt_1fold", epsilon == 0.3, n_reps_used == 3, loss_function == "MSE") %>%
   select(comp_no, nbasis, value = metric) %>%
   mutate(method = "DT 1-fold (eps=0.3)")
 
-# 6. DT 1-fold (eps=0.5)
+# 6. DT 1-fold (eps=0.5, 3 reps, MSE loss)
 dt1_05 <- results %>%
-  filter(source == "dt_1fold", eps == 0.5) %>%
+  filter(method_name == "dt_1fold", epsilon == 0.5, n_reps_used == 3, loss_function == "MSE") %>%
   select(comp_no, nbasis, value = metric) %>%
   mutate(method = "DT 1-fold (eps=0.5)")
 
 # 7. ESIM Standard
 esim_std <- results %>%
-  filter(source == "esim_standard") %>%
+  filter(method_name == "esim_standard") %>%
   select(comp_no, nbasis, value = metric) %>%
   mutate(method = "ESIM Standard")
 
 # 8. ESIM Data Fission
 esim_fis <- results %>%
-  filter(source == "esim_fission") %>%
+  filter(method_name == "esim_fission") %>%
   select(comp_no, nbasis, value = metric) %>%
   mutate(method = "ESIM Data Fission")
 
