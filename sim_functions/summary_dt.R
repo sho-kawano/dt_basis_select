@@ -27,11 +27,11 @@ make_plugin_nll <- function(z_test_rep, eps_rep, d_var, n_folds) {
 make_predictive_nll <- function(z_test_rep, eps_rep, d_var, n_folds) {
   function(theta.hat, theta.var, j) {
     if (n_folds == 1) {
-      # For k=1
+      # For k=1: model estimates eps*theta, need to transform to theta
       mean_pred <- ((1 - eps_rep) / eps_rep) * theta.hat
-      sd_pred <- sqrt((1 - eps_rep) * d_var + (1 - eps_rep)^2 * theta.var)
+      sd_pred <- sqrt((1 - eps_rep) * d_var + ((1 - eps_rep) / eps_rep)^2 * theta.var)
     } else {
-      # For k>1
+      # For k>1: model estimates (1-eps)*theta, need to transform to theta
       mean_pred <- (eps_rep / (1 - eps_rep)) * theta.hat
       sd_pred <- sqrt(eps_rep * d_var + (eps_rep / (1 - eps_rep))^2 * theta.var)
     }
@@ -106,16 +106,14 @@ summary_dt <- function(comp_no, n_folds, loss_function, results_dir, n_reps_to_u
     z_train_rep <- split_env$z_train
     z_test_rep <- split_env$z_test
     fold_cors_rep <- split_env$fold_cors
-    eps_rep <- split_env$eps
 
-    # Note: eps is loaded from the split file above
-    # For k=1, eps is a scalar (the thinning_param from config, default 0.5)
-    # For k>1, eps is a matrix with one value per fold (all equal to 1/k)
-    # Extract scalar value for use in loss functions
+    # Determine eps value
+    # For k=1, eps is saved in the file (user-specified thinning parameter)
+    # For k>1, eps is deterministic: 1/k (not saved in file)
     if (n_folds == 1) {
-      eps_scalar <- eps_rep
+      eps_scalar <- split_env$eps
     } else {
-      eps_scalar <- eps_rep[1, 1] # For k>1, all epsilon values are the same (1/k)
+      eps_scalar <- 1 / n_folds
     }
 
     #-----------------------------------------------------------------------------
@@ -131,7 +129,7 @@ summary_dt <- function(comp_no, n_folds, loss_function, results_dir, n_reps_to_u
 
       # create the results table for a given fold
       res <- results %>%
-        select(domain, mean, var, method) %>%
+        select(domain, mean, var, method, nbasis) %>%
         rename(fips = domain, estim = mean, estim_var = var)
 
       # Create the appropriate loss function using factory
@@ -159,20 +157,21 @@ summary_dt <- function(comp_no, n_folds, loss_function, results_dir, n_reps_to_u
           method = paste0("DT ", n_folds, " fold - ", loss_function),
           metric_type = loss_function
         ) %>%
+        left_join(res %>% select(fips, model = method, nbasis) %>% distinct(model, nbasis), by = "model") %>%
         relocate(rep_no, fold_no, comp_no, method, model, metric, metric_type) %>%
         arrange(metric)
     } # End of folds loop
 
     # Average across folds for this repetition
     result_one_rep %>%
-      group_by(comp_no, method, model, metric_type, rep_no) %>%
+      group_by(comp_no, method, model, metric_type, rep_no, nbasis) %>%
       reframe(metric = mean(metric))
   } # End of repetitions loop
 
   #-----------------------------------------------------------------------------
   # Average across repetitions and return final result
   result_all_reps %>%
-    group_by(comp_no, method, model, metric_type) %>%
+    group_by(comp_no, method, model, metric_type, nbasis) %>%
     reframe(metric = mean(metric)) %>%
     arrange(metric) %>%
     relocate(metric_type, .after = last_col())

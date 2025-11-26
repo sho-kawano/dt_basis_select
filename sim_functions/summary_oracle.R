@@ -1,3 +1,5 @@
+library(tidyverse)
+
 # function to caculate DIC for one posterior sample 
 calc_DIC <- function(theta_samples, z, d){
   # theta_samples: MCMC samples, each row is a sample
@@ -52,33 +54,48 @@ summary_oracle <- function(comp_no, results_dir){
 
   z = z_data$values
   d = d_data$values
+  puma_ids = z_data$puma
 
-  # Extract chains from new structure
+  # Load true population values from results directory
+  base_folder = file.path(getwd(), results_dir)
+  theta_true_data = readRDS(file.path(base_folder, "theta_true.RDS"))
+
+  # Ensure alignment with z_data (same PUMAs, same order)
+  theta_true_df <- data.frame(
+    PUMA = theta_true_data$puma,
+    truth = theta_true_data$values
+  ) %>%
+    filter(PUMA %in% puma_ids) %>%
+    arrange(PUMA)
+
+  truth <- theta_true_df$truth
+
+  # Extract chains and model info from new structure
   post_samples <- lapply(all_results, function(x) x$chain$theta)
+  model_names <- sapply(all_results, function(x) x$model)
+  nbasis_values <- sapply(all_results, function(x) x$nbasis)
 
-  # Only 3 models: 1, 4, 7 covariates
-  cov_counts <- c(1, 4, 7)
-
-  # workaround for adding in direct estimate
+  # Compute posterior means for each model
   estimates = sapply(post_samples, function(x){x %>% colMeans()})
   estimates = cbind(estimates, z)
 
+  # Calculate MSE against truth (not z!)
   mse_df = data.frame(comp_no=comp_no,
-                      model=c(paste0(cov_counts, "_cov_model"), "D.Est"),
-                      no_covs = c(cov_counts, NA),
-                            mse_true=colMeans((estimates-z)^2))
+                      model=c(model_names, "D.Est"),
+                      nbasis = c(nbasis_values, NA),
+                      mse_true=colMeans((estimates-truth)^2))
   waic_df = data.frame(comp_no=comp_no,
-                      model=c(paste0(cov_counts, "_cov_model")),
-                      no_covs = cov_counts,
+                      model=model_names,
+                      nbasis = nbasis_values,
                       WAIC = sapply(post_samples, calc_WAIC, z=z, d=d))
   dic_df = data.frame(comp_no=comp_no,
-                      model=c(paste0(cov_counts, "_cov_model")),
-                      no_covs = cov_counts,
+                      model=model_names,
+                      nbasis = nbasis_values,
                       DIC = sapply(post_samples, calc_DIC, z=z, d=d))
 
   summary_df = mse_df %>%
-    left_join(waic_df, by = join_by(comp_no, model, no_covs)) %>%
-    right_join(dic_df, by = join_by(comp_no, model, no_covs)) %>%
+    left_join(waic_df, by = join_by(comp_no, model, nbasis)) %>%
+    left_join(dic_df, by = join_by(comp_no, model, nbasis)) %>%
     arrange(mse_true)
 
   return(summary_df)

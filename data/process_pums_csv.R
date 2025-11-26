@@ -7,7 +7,7 @@ library(dplyr)
 
 # Read household-level variables
 households <- read_csv(
-  file = file.path("data", "psam_h06.csv"),
+  file = "psam_h06.csv",
   col_select = c(
     "SERIALNO",
     "TEN", # Tenure (own/rent) - for homeownership_rate
@@ -18,28 +18,29 @@ households <- read_csv(
 
 # Read person-level variables
 persons <- read_csv(
-  file = file.path("data", "psam_p06.csv"),
+  file = "psam_p06.csv",
   col_select = c(
     "SERIALNO",
     "PWGTP", # Person weight
     "PUMA", # Geographic area
     # Demographics
-    "AGEP", # Age - for mean_age, sd_age
-    "SEX", # Sex - for pct_male
-    "RAC1P", # Race - for pct_asian, pct_black
+    "AGEP", # Age - for age-based indicators
+    "SEX", # Sex - for sex-based indicators
+    "RAC1P", # Race - for race-based indicators
     "HISP", # Hispanic origin - for pct_hispanic
-    "MAR", # Marital status - for pct_married
+    "MAR", # Marital status - for married indicator
     "CIT", # Citizenship - for pct_citizen
     # Economic
-    "WAGP", # Wages/salary - for median_wage
-    "ESR", # Employment status - for employment_rate
+    "WAGP", # Wages/salary
+    "ESR", # Employment status
+    "JWMNP", # Travel time to work (commute)
     # Education
-    "SCHL", # Educational attainment - for pct_bachelor
+    "SCHL", # Educational attainment
     # Health
-    "DIS", # Disability status - for disability_rate
+    "DIS", # Disability status
+    "PUBCOV", # Public health insurance coverage
     # Response variables
-    "POVPIP", # Income-to-poverty ratio - for poverty_rate response
-    "HICOV" # Health insurance - for hicov_rate response
+    "POVPIP" # Income-to-poverty ratio
   )
 )
 
@@ -61,6 +62,6 @@ cat("  Number of PUMAs:", n_distinct(acs_pop$PUMA), "\n")
 cat("  Variables included:", ncol(acs_pop), "\n")
 
 # Save as .rds for efficient reading
-saveRDS(acs_pop, file = file.path("data", "ca_pums_population.rds"))
+saveRDS(acs_pop, file = "ca_pums_population.rds")
 
 cat("\nSaved to: data/ca_pums_population.rds\n")
