@@ -15,7 +15,7 @@ if (length(args) == 0) {
 }
 
 results_dir <- args[1]
-summaries_file <- file.path(results_dir, "all_summaries.RDS")
+summaries_file <- file.path(results_dir, "results.RDS")
 
 if (!file.exists(summaries_file)) {
   stop(sprintf("Summaries file not found: %s\nRun 'Rscript run_summary.R %s' first",
