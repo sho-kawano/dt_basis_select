@@ -1,0 +1,244 @@
+\documentclass[12pt]{article}
+\usepackage{amsmath, amssymb}
+\usepackage{enumerate}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\title{Spatial Basis Function Fay-Herriot Model:\\Model Specification and MCMC Sampler}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Model Specification}
+
+\subsection{Data Model}
+For areas $i = 1, \ldots, m$, we observe direct estimates $y_i$ with known sampling variances $d_i$:
+\begin{equation}
+y_i \mid \theta_i, d_i \sim \mathcal{N}(\theta_i, d_i)
+\end{equation}
+
+\subsection{Linking Model}
+The area-level parameters follow a regression structure with spatial random effects:
+\begin{equation}
+\theta_i = \mathbf{x}_i^\top \boldsymbol{\beta} + v_i + w_i, \quad i = 1, \ldots, m
+\end{equation}
+where:
+\begin{itemize}
+    \item $\mathbf{x}_i$ is a $p \times 1$ vector of covariates for area $i$
+    \item $\boldsymbol{\beta}$ is a $p \times 1$ vector of regression coefficients
+    \item $v_i$ is a spatial random effect for area $i$
+    \item $w_i$ is an IID random effect for area $i$, i.e. $w_i \overset{iid}{\sim} \mathcal{N}(0, \sigma^2)$.
+\end{itemize}
+
+\subsubsection*{Spatial Structure via Basis Functions}
+The spatial random effects are modeled using a reduced-rank basis expansion:
+\begin{equation}
+\mathbf{v} = \mathbf{S} \boldsymbol{\eta}
+\end{equation}
+where:
+\begin{itemize}
+    \item $\mathbf{S}$ is an $m \times r$ matrix of spatial basis functions (Moran's I eigenvectors)
+    \item $\boldsymbol{\eta} = (\eta_1, \ldots, \eta_r)^\top$ are the basis coefficients
+    \item $r < m$ provides dimension reduction
+\end{itemize}
+
+The basis coefficients are assumed to be independent:
+\begin{equation}
+\eta_j \sim \mathcal{N}(0, \tau^2), \quad j = 1, \ldots, r
+\end{equation}
+or equivalently, $\boldsymbol{\eta} \sim \mathcal{N}_r(\mathbf{0}, \tau^2 \mathbf{I}_r)$.
+
+
+\subsection{Construction of Spatial Basis Matrix $\mathbf{S}$}
+The spatial basis matrix is constructed from the adjacency matrix $\mathbf{A}$ using Moran's I eigenvector decomposition:
+
+\begin{enumerate}
+    \item Compute the projection matrix: $\mathbf{P}_{\mathbf{X}} = \mathbf{X}(\mathbf{X}^\top\mathbf{X})^{-1}\mathbf{X}^\top$
+    \item Form the Moran's I operator:
+    \begin{equation}
+    \mathbf{G} = (\mathbf{I}_m - \mathbf{P}_{\mathbf{X}}) \mathbf{A} (\mathbf{I}_m - \mathbf{P}_{\mathbf{X}})
+    \end{equation}
+    \item Compute the eigendecomposition: $\mathbf{G} = \mathbf{U} \boldsymbol{\Lambda} \mathbf{U}^\top$
+    \item Select the first $r$ eigenvectors corresponding to positive eigenvalues
+    \item Set $\mathbf{S} = \mathbf{U}_{[:, 1:r]}$ (first $r$ columns of $\mathbf{U}$)
+\end{enumerate}
+
+Note: $\mathbf{S}$ is computed once before MCMC and held fixed throughout.
+
+\section{Prior Specifications}
+
+For the regression coefficients, we use an improper uniform prior
+\(p(\boldsymbol{\beta}) \propto 1\).
+The basis coefficients are independent,
+\(\eta_j \sim \mathcal{N}(0,\tau^2)\) for \(j = 1,\ldots,r\),
+with variance parameter \(\tau^2 \sim \text{IG}(a,b)\),
+where \(a,b > 0\) (default: \(a = b = 0.5\)).
+
+The IID random effects have variance \(\sigma^2 \sim \text{IG}(c,d)\),
+with hyperparameters \(c,d > 0\) (default: \(c = d = 0.5\)).
+
+\section{Full Conditional Distributions}
+
+Let $\mathbf{D} = \mathrm{diag}(d_1,\ldots,d_m)$ denote the diagonal matrix of sampling variances. The augmented design matrix is 
+$\mathbf{Z} = [\,\mathbf{X} \ \ \mathbf{S}\,]$ (dimension $m \times (p+r)$) with corresponding parameter
+vector $\boldsymbol{\gamma} = (\boldsymbol{\beta}^\top, \boldsymbol{\eta}^\top)^\top$. The mean can be written as $\boldsymbol{\theta} = \mathbf{Z}\boldsymbol{\gamma} + \mathbf{w}$ and the likelihood is 
+\[
+\mathbf{y} \mid \boldsymbol{\gamma}, \mathbf{w} \sim
+\mathcal{N}_m(\mathbf{Z}\boldsymbol{\gamma} + \mathbf{w}, \mathbf{D}),
+\]
+where $\mathbf{w} = (w_1,\ldots,w_m)^\top$.
+
+\subsubsection*{Full conditional for $\boldsymbol{\gamma} = (\boldsymbol{\beta}^\top, \boldsymbol{\eta}^\top)^\top$}
+
+The Priors are $p(\boldsymbol{\beta}) \propto 1$ and $\boldsymbol{\eta} \mid \tau^2 \sim \mathcal{N}_r(\mathbf{0}, \tau^2 \mathbf{I}_r)$. This gets us the full conditional 
+\[
+[\boldsymbol{\gamma} \mid \text{rest}]
+\sim \mathcal{N}_{p+r}\big( \boldsymbol{\mu}_\gamma, \boldsymbol{\Omega}_\gamma^{-1} \big),
+\]
+where the precision matrix and mean vector are 
+\begin{align}
+\boldsymbol{\Omega}_\gamma
+&= \mathbf{Z}^\top \mathbf{D}^{-1} \mathbf{Z}
+  + \begin{pmatrix}
+      \mathbf{0}_{p \times p} & \mathbf{0}_{p \times r} \\
+      \mathbf{0}_{r \times p} & \tau^{-2} \mathbf{I}_r
+    \end{pmatrix}  \label{eq:omega_gamma}\\
+&= \mathbf{Z}^\top \mathbf{D}^{-1} \mathbf{Z} + \mathrm{diag}(\mathbf{0}_p, \tau^{-2}\mathbf{1}_r) \notag \\
+\boldsymbol{\mu}_\gamma &= \boldsymbol{\Omega}_\gamma^{-1} \mathbf{Z}^\top \mathbf{D}^{-1} (\mathbf{y} - \mathbf{w}) \label{eq:mu_gamma}.
+\end{align}
+
+This follows from Bayesian conjugacy for Gaussian models. The likelihood is $\mathbf{y} - \mathbf{w} \mid \boldsymbol{\gamma} \sim \mathcal{N}_m(\mathbf{Z}\boldsymbol{\gamma}, \mathbf{D})$, giving likelihood precision $\mathbf{Z}^\top \mathbf{D}^{-1} \mathbf{Z}$. The prior precision is block-diagonal: zero for $\boldsymbol{\beta}$ (flat prior) and $\tau^{-2}\mathbf{I}_r$ for $\boldsymbol{\eta}$. The posterior precision is the sum of likelihood and prior precisions, and the posterior mean solves the normal equations $\boldsymbol{\Omega}_\gamma \boldsymbol{\mu}_\gamma = \mathbf{Z}^\top \mathbf{D}^{-1}(\mathbf{y} - \mathbf{w})$. 
+
+\subsubsection*{Full conditional for $\mathbf{w}$ (IID random effects)}
+
+The prior is $\mathbf{w} \mid \sigma^2 \sim \mathcal{N}_m(\mathbf{0}, \sigma^2 \mathbf{I}_m)$.  This yields the full conditional 
+\[
+[\mathbf{w} \mid \text{rest}]
+\sim \mathcal{N}_m(\boldsymbol{\mu}_w, \boldsymbol{\Omega}_w^{-1}),
+\]
+where the precision matrix and mean vector are 
+\begin{align}
+\boldsymbol{\Omega}_w &= \mathbf{D}^{-1} + \sigma^{-2} \mathbf{I}_m \label{eq:omega_w}\\
+\boldsymbol{\mu}_w &= \boldsymbol{\Omega}_w^{-1} \mathbf{D}^{-1} (\mathbf{y} - \mathbf{Z}\boldsymbol{\gamma}) \label{eq:mu_w}.
+\end{align}
+
+Since $\boldsymbol{\Omega}_w = \mathbf{D}^{-1} + \sigma^{-2} \mathbf{I}_m$ is the sum of two diagonal matrices, it is diagonal. Since $\mathbf{D}$ is also diagonal this allows us to sample independently:
+\[
+[w_i \mid \text{rest}] \sim
+\mathcal{N}\left( m_i, s_i^2 \right), \quad i=1,\ldots,m,
+\]
+where
+\begin{align}
+s_i^2 &= \left( d_i^{-1} + \sigma^{-2} \right)^{-1}
+      = \frac{d_i \sigma^2}{d_i + \sigma^2} \label{eq:var_w}\\
+m_i &= \frac{s_i^2}{d_i} (y_i - \mathbf{z}_i^\top \boldsymbol{\gamma}) \label{eq:mean_w}
+\end{align}
+and $\mathbf{z}_i^\top$ is the $i$th row of $\mathbf{Z} = [\,\mathbf{X} \ \ \mathbf{S}\,]$.
+
+\subsubsection*{Full conditional for $\sigma^2$ (IID variance)}
+
+The prior here is $\sigma^2 \sim \text{IG}(c, d)$.  This gets us the full conditional \[
+[\sigma^2 \mid \text{rest}]
+\sim \text{IG}\left( c + \frac{m}{2}, \ d + \frac{1}{2} \mathbf{w}^\top \mathbf{w} \right) \label{eq:sigma_sq}.
+\]
+
+\subsubsection*{Full conditional for $\tau^2$ (spatial coefficient variance)}
+
+Similarly with the prior $\tau^2 \sim \text{IG}(a, b)$, we have 
+\[
+[\tau^2 \mid \text{rest}]
+\sim \text{IG}\left( a + \frac{r}{2}, \ b + \frac{1}{2} \boldsymbol{\eta}^\top \boldsymbol{\eta} \right) \label{eq:tau_sq}
+\]
+
+\section{MCMC Implementation}
+
+Posterior inference is conducted via a Gibbs sampler that exploits the closed-form
+full conditional distributions derived above. Each iteration proceeds as follows.
+
+\begin{enumerate}
+  \item \textbf{Update $\boldsymbol{\gamma} = (\boldsymbol{\beta}^\top, \boldsymbol{\eta}^\top)^\top$.}
+
+  Sample $\boldsymbol{\gamma}^{(t+1)} \sim [\boldsymbol{\gamma} \mid \text{rest}]$ using precision-based Cholesky sampling:
+  \begin{enumerate}[(a)]
+    \item Compute $\boldsymbol{\Omega}_\gamma^{(t)} = \mathbf{Z}^\top \mathbf{D}^{-1} \mathbf{Z} + \mathrm{diag}(\mathbf{0}_p, (\tau^{2\,(t)})^{-1}\mathbf{1}_r)$
+    \item Compute Cholesky: $\boldsymbol{\Omega}_\gamma^{(t)} = \mathbf{U}^\top\mathbf{U}$
+    \item Compute $\mathbf{a}^{(t)} = \mathbf{Z}^\top \mathbf{D}^{-1}(\mathbf{y} - \mathbf{w}^{(t)})$
+    \item Sample $\mathbf{z} \sim \mathcal{N}_{p+r}(\mathbf{0}, \mathbf{I}_{p+r})$
+    \item Set $\boldsymbol{\gamma}^{(t+1)} = \mathbf{U}^{-1}(\mathbf{U}^{-\top}\mathbf{a}^{(t)} + \mathbf{z})$
+    \item Partition: $\boldsymbol{\beta}^{(t+1)} = \boldsymbol{\gamma}^{(t+1)}_{1:p}$, $\boldsymbol{\eta}^{(t+1)} = \boldsymbol{\gamma}^{(t+1)}_{(p+1):(p+r)}$
+  \end{enumerate}
+
+  \textbf{Code (Eq.~\ref{eq:omega_gamma}--\ref{eq:mu_gamma}):}
+\begin{verbatim}
+Z <- cbind(X, S)
+Omega_gamma <- crossprod(Z, (1/d.var) * Z)
+diag(Omega_gamma)[(p+1):(p+r)] <- diag(Omega_gamma)[(p+1):(p+r)] + (1/tau.sq)
+U <- chol(Omega_gamma)
+a <- crossprod(Z, (y - w) / d.var)
+b <- rnorm(p + r)
+gamma <- backsolve(U, backsolve(U, a, transpose = TRUE) + b)
+beta <- gamma[1:p]
+eta <- gamma[(p+1):(p+r)]
+\end{verbatim}
+
+  \item \textbf{Update $\mathbf{w}$.}
+
+  Sample $\mathbf{w}^{(t+1)} \sim [\mathbf{w} \mid \text{rest}]$ elementwise (Eq.~\ref{eq:var_w}--\ref{eq:mean_w}):
+  \begin{enumerate}[(a)]
+    \item For $i = 1, \ldots, m$:
+    \begin{align*}
+      s_i^2 &= \frac{d_i \sigma^{2\,(t)}}{d_i + \sigma^{2\,(t)}} \\
+      m_i &= \frac{s_i^2}{d_i} (y_i - \mathbf{z}_i^\top \boldsymbol{\gamma}^{(t+1)}) \\
+      w_i^{(t+1)} &\sim \mathcal{N}(m_i, s_i^2)
+    \end{align*}
+  \end{enumerate}
+
+  \textbf{Code (Eq.~\ref{eq:var_w}--\ref{eq:mean_w}):}
+\begin{verbatim}
+Z_gamma <- as.numeric(Z %*% gamma)
+var_w <- (d.var * sigma.sq) / (d.var + sigma.sq)
+mean_w <- var_w * (y - Z_gamma) / d.var
+w <- rnorm(m, mean = mean_w, sd = sqrt(var_w))
+\end{verbatim}
+
+  \item \textbf{Update $\sigma^2$.}
+  
+  Sample
+  \[
+    \sigma^{2\,(t+1)} \sim \text{IG}\left( c + \frac{m}{2}, \ d + \frac{1}{2} \mathbf{w}^{(t+1)\top} \mathbf{w}^{(t+1)} \right).
+  \]
+
+  \textbf{Code (Eq.~\ref{eq:sigma_sq}):}
+\begin{verbatim}
+sigma.sq <- 1 / rgamma(1, shape = c + m/2, rate = d + sum(w^2)/2)
+\end{verbatim}
+
+  \item \textbf{Update $\tau^2$.}
+  
+  Using the current draw $\boldsymbol{\eta}^{(t+1)}$, sample
+  \[
+    \tau^{2\,(t+1)} \sim \text{IG}\left( a + \frac{r}{2}, \ b + \frac{1}{2} \boldsymbol{\eta}^{(t+1)\top} \boldsymbol{\eta}^{(t+1)} \right).
+  \]
+
+  \textbf{Code (Eq.~\ref{eq:tau_sq}):}
+\begin{verbatim}
+tau.sq <- 1 / rgamma(1, shape = a + r/2, rate = b + sum(eta^2)/2)
+\end{verbatim}
+
+  \item \textbf{Derived quantities.}
+  
+  Optionally, at each iteration compute
+  \[
+    \boldsymbol{\theta}^{(t+1)} = \mathbf{Z} \boldsymbol{\gamma}^{(t+1)} + \mathbf{w}^{(t+1)}, \quad
+    \mathbf{v}^{(t+1)} = \mathbf{S} \boldsymbol{\eta}^{(t+1)},
+  \]
+  for posterior summaries of the area-level parameters and spatial random effects.
+\end{enumerate}
+
+After discarding an initial burn-in period and thinning if desired, posterior inference is based on
+the retained MCMC samples.
+
+
+\end{document}

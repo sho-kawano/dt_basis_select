@@ -6,11 +6,13 @@ library(tidyverse)
 # k is the number of 'folds' in data thinning
 # eps is the thinning parameter for k=1 (proportion of signal reserved for training)
 # n_reps is the number of repetitions (independent data thinning splits)
-run_dt <- function(comp_no, k, results_dir, eps = 0.5, n_reps = 1) {
-  # ----- loading data /samplers -----
-  source("models/fh_fit.R")
+# model_config is the configuration list from configs/model_configs.R
+run_dt <- function(comp_no, k, results_dir, model_config, eps = 0.5, n_reps = 1) {
+  # ----- Load model function -----
+  source("models/spatial_basis_fh.R")
+  source("models/mcmc_helper.R")
 
-  # specify folder/comparison
+  # Specify folder/comparison
   comp_folder <- file.path(getwd(), results_dir, sprintf("comparison_%03d", comp_no))
 
   # Load comparison-specific data (X, z, d)
@@ -24,6 +26,24 @@ run_dt <- function(comp_no, k, results_dir, eps = 0.5, n_reps = 1) {
   z <- z_data$values
   d <- d_data$values
 
+  # Convert to model matrix
+  # If X_df has no columns (intercept-only), create intercept matrix
+  if (ncol(X_df) == 0) {
+    X <- matrix(1, nrow = length(z), ncol = 1)
+    colnames(X) <- "(Intercept)"
+  } else {
+    X <- model.matrix(~., X_df)
+  }
+
+  # ----- Load adjacency matrix and compute spatial basis -----
+  if (is.null(model_config$adjacency_file)) {
+    stop("model_config$adjacency_file is required! Specify the adjacency matrix file.")
+  }
+  load(model_config$adjacency_file)  # Loads A (adjacency matrix)
+
+  # Compute Moran eigenvectors once (for efficiency)
+  eig_moran <- compute_moran_eigen(A, X)
+
   # Construct DT folder path based on k and eps
   if (k == 1) {
     dt_folder <- file.path(comp_folder, "dt_1fold", sprintf("eps_%.2f", eps))
@@ -34,50 +54,56 @@ run_dt <- function(comp_no, k, results_dir, eps = 0.5, n_reps = 1) {
   dir.create(dt_folder, showWarnings = FALSE, recursive = TRUE)
 
   n <- length(z)  # Number of areas (PUMAs)
-  predictor_names <- colnames(X_df)  # Available predictors
+  nbasis_values <- model_config$nbasis_values
 
   # ----- Loop over repetitions -----
   for (rep in 1:n_reps) {
     # Set seed for this repetition to ensure different splits
     set.seed(comp_no * 1000 + rep)
 
-    # ----- create train/test sets via data thinning -----
+    # ----- Create train/test sets via data thinning -----
     if (k == 1) {
-      # in single-fold it is easier to define z_train first (see dt paper)
+      # Single-fold: define z_train first (see dt paper)
       # eps parameter is passed as function argument (default 0.5)
       # eps = training proportion, (1-eps) = test proportion
       z_train <- rnorm(n = length(z), mean = eps * z, sd = sqrt(eps * (1 - eps) * d))
       z_test <- z - z_train
-      # correlation between test & validation set in each fold (for diagnostics)
+      # Correlation between test & validation set in each fold (for diagnostics)
       fold_cors <- cor(z_train, z_test) %>% round(4)
-      # convert to matrices
+      # Convert to matrices
       z_train <- matrix(z_train, nrow = length(z_train), ncol = 1)
       z_test <- matrix(z_test, nrow = length(z_test), ncol = 1)
     } else {
-      # in multi-fold it is easier to define z_test first (see dt paper)
+      # Multi-fold: define z_test first (see dt paper)
       e0 <- 1 / k # test proportion (0.2 for k=5)
-      eps <- matrix(rep(e0, k), ncol = 1) # thinning parameter
+      eps_mf <- matrix(rep(e0, k), ncol = 1) # thinning parameter
       z_test <- matrix(nrow = n, ncol = k)
-      check <- c()
       for (i in 1:n) {
-        Sig <- d[i] * (diag(e0, nrow = k) - eps %*% t(eps))
-        z_test[i, ] <- mvtnorm::rmvnorm(n = 1, mean = eps * z[i], sigma = Sig) %>%
+        Sig <- d[i] * (diag(e0, nrow = k) - eps_mf %*% t(eps_mf))
+        z_test[i, ] <- mvtnorm::rmvnorm(n = 1, mean = eps_mf * z[i], sigma = Sig) %>%
           as.numeric()
       }
-      # create training set
+      # Create training set
       z_train <- z - z_test
-      # correlation between test & validation set in each fold (for diagnostics)
+      # Correlation between test & validation set in each fold (for diagnostics)
       fold_cors <- sapply(
         1:ncol(z_train),
         function(u) cor(z_train[, u], z_test[, u]) %>% round(4)
       )
     }
 
-    # save the results from data thinning (including eps for summary function)
+    # save the results from data thinning
+    # Note: For k>1, eps is deterministic (1/k), no need to save it
     split_file <- sprintf("dt_split_%dfold_rep%d.RDA", k, rep)
-    save(z_train, z_test, fold_cors, eps,
-      file = file.path(dt_folder, split_file)
-    )
+    if (k == 1) {
+      save(z_train, z_test, fold_cors, eps,
+        file = file.path(dt_folder, split_file)
+      )
+    } else {
+      save(z_train, z_test, fold_cors,
+        file = file.path(dt_folder, split_file)
+      )
+    }
 
     # ----- Loop over folds -----
     # Run all folds sequentially (no nested parallelization)
@@ -85,30 +111,42 @@ run_dt <- function(comp_no, k, results_dir, eps = 0.5, n_reps = 1) {
     for (fold in 1:k) {
       tryCatch(
         {
-          # Only fit models with 1, 4, 7 covariates (matching main.tex)
-          cov_counts <- c(1, 4, 7)
-          all_results <- vector("list", length(cov_counts))
+          # Loop over nbasis values
+          all_results <- vector("list", length(nbasis_values))
 
-          for (i in seq_along(cov_counts)) {
-            ncovs <- cov_counts[i]
-            X <- model.matrix(~., X_df[, predictor_names[1:ncovs], drop = F])
+          for (i in seq_along(nbasis_values)) {
+            nb <- nbasis_values[i]
 
-            # Set unique seed for each model fit: varies by comparison, rep, fold, and model
+            # Set unique seed for each model fit: varies by comparison, rep, fold, and nbasis
             # This ensures independent MCMC chains across all dimensions
-            set.seed(comp_no * 10000 + rep * 100 + fold * 10 + ncovs)
+            set.seed(comp_no * 10000 + rep * 100 + fold * 10 + nb)
+
             # Variance for training: eps*d for k=1, (1-e0)*d for k>1
             train_d <- if (k == 1) eps * d else (1 - e0) * d
-            # Using minimal iterations for testing - increase for production
-            fh_chain <- fh_fit(X, z_train[, fold], train_d,
-              ndesired = 10, nburn = 10, nthin = 1, verbose = F
+
+            # Fit model
+            fit <- spatial_basis_fh(
+              X = X,
+              y = z_train[, fold],
+              d.var = train_d,
+              nbasis = nb,
+              eig_moran = eig_moran,
+              A = A,
+              spatial_type = model_config$spatial_type,
+              ndesired = model_config$ndesired,
+              nburn = model_config$nburn,
+              nthin = model_config$nthin,
+              hyp = model_config$hyp,
+              verbose = FALSE
             )
 
             # Save posterior mean and variance for theta
             all_results[[i]] <- data.frame(
               domain = puma_ids,
-              mean = colMeans(fh_chain$theta),
-              var = apply(fh_chain$theta, 2, var),
-              method = paste0(ncovs, "_cov_model")
+              mean = colMeans(fit$theta),
+              var = apply(fit$theta, 2, var),
+              method = sprintf("nbasis_%03d", nb),
+              nbasis = nb
             )
           }
           all_results <- all_results %>% bind_rows()

@@ -3,13 +3,13 @@ library(doParallel)
 library(LaplacesDemon)
 library(tidyverse)
 library(Matrix)
-#library(rstan)
 
 # runs empirical simulation study for comparison # `comp_no`
-run_esim <- function(comp_no, n_cores, results_dir, n_iters=100){
+# model_config is the configuration list from configs/model_configs.R
+run_esim <- function(comp_no, n_cores, results_dir, model_config, n_iters=100){
 
-  # ---- set up ----
-  # folder where the comparison is stored
+  # ---- Set up ----
+  # Folder where the comparison is stored
   comp_folder = file.path(getwd(), results_dir, sprintf("comparison_%03d", comp_no))
 
   # Load comparison-specific data (X, d)
@@ -20,10 +20,29 @@ run_esim <- function(comp_no, n_cores, results_dir, n_iters=100){
   puma_ids <- X_data$puma
   X_df <- X_data$X  # Data frame with predictor columns
   d_var <- d_data$values
-  predictor_names <- colnames(X_df)
 
-  # load sampler
-  source("models/fh_fit.R")
+  # Convert to model matrix
+  # If X_df has no columns (intercept-only), create intercept matrix
+  if (ncol(X_df) == 0) {
+    X <- matrix(1, nrow = length(d_var), ncol = 1)
+    colnames(X) <- "(Intercept)"
+  } else {
+    X <- model.matrix(~., X_df)
+  }
+
+  # Load model functions
+  source("models/spatial_basis_fh.R")
+  source("models/mcmc_helper.R")
+
+  # Load adjacency matrix and compute spatial basis
+  if (is.null(model_config$adjacency_file)) {
+    stop("model_config$adjacency_file is required! Specify the adjacency matrix file.")
+  }
+  load(model_config$adjacency_file)  # Loads A (adjacency matrix)
+  eig_moran <- compute_moran_eigen(A, X)
+
+  # Get nbasis values from config
+  nbasis_values <- model_config$nbasis_values
 
   # ---- decide parallelization strategy based on n_cores ----
   if(n_cores > 1) {
@@ -40,36 +59,47 @@ run_esim <- function(comp_no, n_cores, results_dir, n_iters=100){
     foreach(iter=1:n_iters) %dopar% {
     tryCatch({
       set.seed(iter*comp_no)
-      # Only fit models with 1, 4, 7 covariates
-      cov_counts <- c(1, 4, 7)
-      # each of the models + direct estimate - preallocate
-      results = vector("list", length(cov_counts)+1)
+      # Each of the models + direct estimate - preallocate
+      results = vector("list", length(nbasis_values)+1)
 
-      # load synthetic direct estimate w
+      # Load synthetic direct estimate w
       sub_folder = file.path(comp_folder, "emp_sim", sprintf("%03d", iter))
       w = readRDS(file.path(sub_folder, "w.RDS")) %>% as.numeric()
 
-      # save the direct estimate to results
+      # Save the direct estimate to results
       results[[1]] = data.frame(domain=puma_ids, mean=w,
                             median=NA, var=d_var, lower=NA, upper=NA, method="Direct")
 
-      # run each of the models - save results
-      for(i in seq_along(cov_counts)){
-        ncovs <- cov_counts[i]
-        X = model.matrix(~., X_df[, predictor_names[1:ncovs], drop=F])
+      # Run each of the models - save results
+      for(i in seq_along(nbasis_values)){
+        nb <- nbasis_values[i]
 
-        # Set unique seed for each model fit: varies by comparison, iteration, and model
-        set.seed(comp_no * 10000 + iter * 10 + ncovs)
-        # Using minimal iterations for testing - increase for production
-        fh_chain = fh_fit(X, w, d_var, ndesired=10, nburn=10, nthin=1, verbose=F)
+        # Set unique seed for each model fit: varies by comparison, iteration, and nbasis
+        set.seed(comp_no * 10000 + iter * 10 + nb)
 
-        results[[i+1]] = fh_chain %>%
-          mcmc_summary("theta", paste0(ncovs, "_cov_model")) %>%
-          mutate(domain=puma_ids) %>%
+        # Fit model
+        fit <- spatial_basis_fh(
+          X = X,
+          y = w,
+          d.var = d_var,
+          nbasis = nb,
+          eig_moran = eig_moran,
+          A = A,
+          spatial_type = model_config$spatial_type,
+          ndesired = model_config$ndesired,
+          nburn = model_config$nburn,
+          nthin = model_config$nthin,
+          hyp = model_config$hyp,
+          verbose = FALSE
+        )
+
+        results[[i+1]] = fit %>%
+          mcmc_summary("theta", sprintf("nbasis_%03d", nb)) %>%
+          mutate(domain=puma_ids, nbasis=nb) %>%
           relocate(domain)
       }
 
-      # ---- save results & wrap up  ----
+      # ---- Save results & wrap up  ----
       results = results %>% bind_rows()
       row.names(results) = NULL
       saveRDS(results, file=file.path(sub_folder, "results.RDS"))
@@ -90,36 +120,47 @@ run_esim <- function(comp_no, n_cores, results_dir, n_iters=100){
     for(iter in 1:n_iters) {
       tryCatch({
         set.seed(iter*comp_no)
-        # Only fit models with 1, 4, 7 covariates
-        cov_counts <- c(1, 4, 7)
-        # each of the models + direct estimate - preallocate
-        results = vector("list", length(cov_counts)+1)
+        # Each of the models + direct estimate - preallocate
+        results = vector("list", length(nbasis_values)+1)
 
-        # load synthetic direct estimate w
+        # Load synthetic direct estimate w
         sub_folder = file.path(comp_folder, "emp_sim", sprintf("%03d", iter))
         w = readRDS(file.path(sub_folder, "w.RDS")) %>% as.numeric()
 
-        # save the direct estimate to results
+        # Save the direct estimate to results
         results[[1]] = data.frame(domain=puma_ids, mean=w,
                               median=NA, var=d_var, lower=NA, upper=NA, method="Direct")
 
-        # run each of the models - save results
-        for(i in seq_along(cov_counts)){
-          ncovs <- cov_counts[i]
-          X = model.matrix(~., X_df[, predictor_names[1:ncovs], drop=F])
+        # Run each of the models - save results
+        for(i in seq_along(nbasis_values)){
+          nb <- nbasis_values[i]
 
-          # Set unique seed for each model fit: varies by comparison, iteration, and model
-          set.seed(comp_no * 10000 + iter * 10 + ncovs)
-          # Using minimal iterations for testing - increase for production
-          fh_chain = fh_fit(X, w, d_var, ndesired=10, nburn=10, nthin=1, verbose=F)
+          # Set unique seed for each model fit: varies by comparison, iteration, and nbasis
+          set.seed(comp_no * 10000 + iter * 10 + nb)
 
-          results[[i+1]] = fh_chain %>%
-            mcmc_summary("theta", paste0(ncovs, "_cov_model")) %>%
-            mutate(domain=puma_ids) %>%
+          # Fit model
+          fit <- spatial_basis_fh(
+            X = X,
+            y = w,
+            d.var = d_var,
+            nbasis = nb,
+            eig_moran = eig_moran,
+            A = A,
+            spatial_type = model_config$spatial_type,
+            ndesired = model_config$ndesired,
+            nburn = model_config$nburn,
+            nthin = model_config$nthin,
+            hyp = model_config$hyp,
+            verbose = FALSE
+          )
+
+          results[[i+1]] = fit %>%
+            mcmc_summary("theta", sprintf("nbasis_%03d", nb)) %>%
+            mutate(domain=puma_ids, nbasis=nb) %>%
             relocate(domain)
         }
 
-        # ---- save results & wrap up  ----
+        # ---- Save results & wrap up  ----
         results = results %>% bind_rows()
         row.names(results) = NULL
         saveRDS(results, file=file.path(sub_folder, "results.RDS"))

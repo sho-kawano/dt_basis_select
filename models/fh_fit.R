@@ -98,8 +98,8 @@ fh_ver <- "v5: cleaned up version with working test code"
 # library(tidyverse); library(bayesplot)
 # load('samplers/test_data.RDA')
 #
-# y = all_data$povPerc
-# d = all_data$povPercSE^2
+# y = log(all_data$povPerc)
+# d = all_data$povPercSE^2 / all_data$povPerc^2  # Delta method for log scale
 # X = model.matrix(~., all_data[, c("degree",  "assistance")])
 # post.samples = fh_fit(X, y, d, ndesired=2000, nburn=10000, nthin=2, verbose = F)
 #

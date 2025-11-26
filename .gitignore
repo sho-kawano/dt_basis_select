@@ -28,6 +28,8 @@ saved_results/
 # Test files
 test.R
 test_*.R
+!test_ca_oracle_minimal.R  # Exception: oracle validation script
+!test_ca_full_pipeline.R    # Exception: pipeline test script
 test_*.log
 rerun_failed.R
 
@@ -55,4 +57,28 @@ old files/
 
 # Claude documentation and data files
 _for_claude/
-data/
+
+# Large result directories (25GB+)
+_results_*/
+
+# Oracle consistency analysis (ignore all except utility scripts)
+oracle_consistency_analysis/*
+!oracle_consistency_analysis/screen_responses_v2.R
+!oracle_consistency_analysis/test_one_response.R
+!oracle_consistency_analysis/SUMMARY.md
+
+# Archived/superseded code
+archive/
+update/
+
+# Old/superseded summary scripts
+summarize_results.R
+validate_results.R
+run_summaries_only_old.R
+
+# Data files (but keep R scripts for reproducibility)
+data/*.csv        # Raw PUMS CSV files (~6GB)
+data/*.rds        # Generated population files (~60MB)
+data/*.RDA        # Generated adjacency matrices
+data/*.txt
+data/*.zip
