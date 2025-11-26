@@ -84,34 +84,32 @@ all_methods <- bind_rows(oracle, waic, dic, dt5, dt1_03, dt1_05, esim_std, esim_
 
 # Get number of comparisons
 n_comp <- length(unique(all_methods$comp_no))
-ncols <- min(5, ceiling(sqrt(n_comp)))
 
-# Create faceted plot (raw values, free y-axis)
-p1 <- ggplot(all_methods, aes(x = nbasis, y = value, color = method, group = method)) +
-  geom_line(linewidth = 0.6) +
-  geom_point(size = 1.5) +
-  facet_wrap(~comp_no, ncol = ncols, scales = "free_y",
-             labeller = labeller(comp_no = function(x) paste("Comp", x))) +
+# Create faceted plot by METHOD (each method in its own panel)
+# Individual comparisons = light gray lines, Average = bold blue line
+p1 <- ggplot(all_methods, aes(x = nbasis, y = value)) +
+  geom_line(aes(group = comp_no), alpha = 0.25, color = "gray60", linewidth = 0.5) +
+  stat_summary(aes(group = 1), fun = mean, geom = "line",
+               color = "blue", linewidth = 1.2) +
+  facet_wrap(~method, ncol = 3, scales = "free_y") +
   labs(
-    title = sprintf("All Methods Comparison (%d comparisons)", n_comp),
-    subtitle = "Raw values (free y-axis per comparison, lower = better)",
+    title = sprintf("All Methods: Individual vs Average (%d comparisons)", n_comp),
+    subtitle = "Gray = individual comparisons, Blue = average. Raw values (free y-axis per method)",
     x = "Number of basis functions",
-    y = "Score",
-    color = "Method"
+    y = "Score"
   ) +
   theme_minimal() +
   theme(
     plot.title = element_text(face = "bold", size = 12),
-    strip.text = element_text(size = 8),
-    axis.text = element_text(size = 7),
-    legend.position = "bottom"
-  ) +
-  guides(color = guide_legend(nrow = 2))
+    strip.text = element_text(face = "bold", size = 10),
+    axis.text = element_text(size = 8)
+  )
 
 output_file1 <- file.path(results_dir, "all_methods_faceted_raw.png")
-ggsave(output_file1, p1, width = 14, height = ceiling(n_comp/ncols) * 2 + 2, dpi = 150)
+ggsave(output_file1, p1, width = 12, height = 8, dpi = 150)
 
-# Create overlay plot showing average patterns (raw values)
+# Create overlay plot (all methods on same plot, colored by method)
+# Individual comparisons = thin lines, Average = thick lines
 all_methods_avg <- all_methods %>%
   group_by(nbasis, method) %>%
   summarise(mean_value = mean(value), .groups = "drop")
@@ -119,10 +117,10 @@ all_methods_avg <- all_methods %>%
 p2 <- ggplot() +
   geom_line(data = all_methods,
             aes(x = nbasis, y = value, group = interaction(comp_no, method), color = method),
-            alpha = 0.2, linewidth = 0.5) +
+            alpha = 0.2, linewidth = 0.4) +
   geom_line(data = all_methods_avg,
             aes(x = nbasis, y = mean_value, color = method),
-            linewidth = 1.5) +
+            linewidth = 1.2) +
   labs(
     title = sprintf("All Methods: Individual vs Average (%d comparisons)", n_comp),
     subtitle = "Thin lines = individual comparisons, Thick lines = average pattern",
@@ -131,8 +129,11 @@ p2 <- ggplot() +
     color = "Method"
   ) +
   theme_minimal() +
-  theme(legend.position = "bottom") +
-  guides(color = guide_legend(nrow = 2))
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold")
+  ) +
+  guides(color = guide_legend(nrow = 2, override.aes = list(linewidth = 1)))
 
 output_file2 <- file.path(results_dir, "all_methods_overlay_raw.png")
 ggsave(output_file2, p2, width = 12, height = 8, dpi = 150)
