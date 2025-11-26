@@ -41,27 +41,20 @@ oracle_avg <- oracle %>%
   group_by(nbasis) %>%
   summarise(mean_mse = mean(mse_true), .groups = "drop")
 
-# Normalize each comparison to [0, 1] for easier comparison
-oracle_norm <- oracle %>%
-  group_by(comp_no) %>%
-  mutate(
-    mse_norm = (mse_true - min(mse_true)) / (max(mse_true) - min(mse_true))
-  ) %>%
-  ungroup()
-
 # Determine grid layout
 ncols <- min(5, ceiling(sqrt(n_comp)))
 
-# Create faceted plot
-p1 <- ggplot(oracle_norm, aes(x = nbasis, y = mse_norm)) +
+# Create faceted plot (raw MSE values)
+p1 <- ggplot(oracle, aes(x = nbasis, y = mse_true)) +
   geom_line(color = "blue", linewidth = 0.8) +
   geom_point(color = "blue", size = 2) +
-  facet_wrap(~comp_no, ncol = ncols, labeller = labeller(comp_no = function(x) paste("Comp", x))) +
+  facet_wrap(~comp_no, ncol = ncols, scales = "free_y",
+             labeller = labeller(comp_no = function(x) paste("Comp", x))) +
   labs(
     title = sprintf("OD-Oracle MSE by Comparison (%d comparisons)", n_comp),
-    subtitle = "Normalized to [0,1] per comparison to show curve shape",
+    subtitle = "Raw MSE values (free y-axis per comparison)",
     x = "Number of basis functions",
-    y = "Normalized MSE (0=best, 1=worst)"
+    y = "MSE"
   ) +
   theme_minimal() +
   theme(
@@ -70,24 +63,24 @@ p1 <- ggplot(oracle_norm, aes(x = nbasis, y = mse_norm)) +
     axis.text = element_text(size = 7)
   )
 
-output_file <- file.path(results_dir, "oracle_faceted_normalized.png")
+output_file <- file.path(results_dir, "oracle_faceted_raw.png")
 ggsave(output_file, p1, width = 12, height = ceiling(n_comp/ncols) * 2, dpi = 150)
 
-# Also create overlay plot
+# Also create overlay plot (raw values)
 p2 <- ggplot() +
-  geom_line(data = oracle_norm, aes(x = nbasis, y = mse_norm, group = comp_no),
+  geom_line(data = oracle, aes(x = nbasis, y = mse_true, group = comp_no),
             alpha = 0.3, color = "blue") +
-  stat_summary(data = oracle_norm, aes(x = nbasis, y = mse_norm),
+  stat_summary(data = oracle, aes(x = nbasis, y = mse_true),
                fun = mean, geom = "line", color = "red", linewidth = 1.5) +
   labs(
     title = sprintf("OD-Oracle MSE: Individual vs Average (%d comparisons)", n_comp),
-    subtitle = "Blue = individual comparisons (normalized), Red = average pattern",
+    subtitle = "Blue = individual comparisons, Red = average pattern",
     x = "Number of basis functions",
-    y = "Normalized MSE"
+    y = "MSE"
   ) +
   theme_minimal()
 
-output_file2 <- file.path(results_dir, "oracle_overlay_normalized.png")
+output_file2 <- file.path(results_dir, "oracle_overlay_raw.png")
 ggsave(output_file2, p2, width = 10, height = 6, dpi = 150)
 
 cat("\n✓ Plots saved to:\n")

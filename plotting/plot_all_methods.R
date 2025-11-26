@@ -82,29 +82,21 @@ esim_fis <- results %>%
 # Combine all methods
 all_methods <- bind_rows(oracle, waic, dic, dt5, dt1_03, dt1_05, esim_std, esim_fis)
 
-# Normalize each method within each comparison to [0,1]
-all_methods_norm <- all_methods %>%
-  group_by(comp_no, method) %>%
-  mutate(
-    value_norm = (value - min(value)) / (max(value) - min(value))
-  ) %>%
-  ungroup()
-
 # Get number of comparisons
 n_comp <- length(unique(all_methods$comp_no))
 ncols <- min(5, ceiling(sqrt(n_comp)))
 
-# Create faceted plot (normalized)
-p1 <- ggplot(all_methods_norm, aes(x = nbasis, y = value_norm, color = method, group = method)) +
+# Create faceted plot (raw values, free y-axis)
+p1 <- ggplot(all_methods, aes(x = nbasis, y = value, color = method, group = method)) +
   geom_line(linewidth = 0.6) +
   geom_point(size = 1.5) +
-  facet_wrap(~comp_no, ncol = ncols,
+  facet_wrap(~comp_no, ncol = ncols, scales = "free_y",
              labeller = labeller(comp_no = function(x) paste("Comp", x))) +
   labs(
     title = sprintf("All Methods Comparison (%d comparisons)", n_comp),
-    subtitle = "Normalized to [0,1] per method per comparison (lower = better)",
+    subtitle = "Raw values (free y-axis per comparison, lower = better)",
     x = "Number of basis functions",
-    y = "Normalized Score",
+    y = "Score",
     color = "Method"
   ) +
   theme_minimal() +
@@ -116,17 +108,17 @@ p1 <- ggplot(all_methods_norm, aes(x = nbasis, y = value_norm, color = method, g
   ) +
   guides(color = guide_legend(nrow = 2))
 
-output_file1 <- file.path(results_dir, "all_methods_faceted_normalized.png")
+output_file1 <- file.path(results_dir, "all_methods_faceted_raw.png")
 ggsave(output_file1, p1, width = 14, height = ceiling(n_comp/ncols) * 2 + 2, dpi = 150)
 
-# Create overlay plot showing average patterns
-all_methods_avg <- all_methods_norm %>%
+# Create overlay plot showing average patterns (raw values)
+all_methods_avg <- all_methods %>%
   group_by(nbasis, method) %>%
-  summarise(mean_value = mean(value_norm), .groups = "drop")
+  summarise(mean_value = mean(value), .groups = "drop")
 
 p2 <- ggplot() +
-  geom_line(data = all_methods_norm,
-            aes(x = nbasis, y = value_norm, group = interaction(comp_no, method), color = method),
+  geom_line(data = all_methods,
+            aes(x = nbasis, y = value, group = interaction(comp_no, method), color = method),
             alpha = 0.2, linewidth = 0.5) +
   geom_line(data = all_methods_avg,
             aes(x = nbasis, y = mean_value, color = method),
@@ -135,14 +127,14 @@ p2 <- ggplot() +
     title = sprintf("All Methods: Individual vs Average (%d comparisons)", n_comp),
     subtitle = "Thin lines = individual comparisons, Thick lines = average pattern",
     x = "Number of basis functions",
-    y = "Normalized Score",
+    y = "Score",
     color = "Method"
   ) +
   theme_minimal() +
   theme(legend.position = "bottom") +
   guides(color = guide_legend(nrow = 2))
 
-output_file2 <- file.path(results_dir, "all_methods_overlay_normalized.png")
+output_file2 <- file.path(results_dir, "all_methods_overlay_raw.png")
 ggsave(output_file2, p2, width = 12, height = 8, dpi = 150)
 
 cat("\n✓ Plots saved to:\n")
