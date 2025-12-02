@@ -89,7 +89,7 @@ summary_dt <- function(comp_no, n_folds, loss_function, results_dir, n_reps_to_u
     if (is.null(eps)) stop("eps parameter required for n_folds=1")
     dt_folder <- file.path(comp_folder, "dt_1fold", sprintf("eps_%.2f", eps))
   } else {
-    dt_folder <- file.path(comp_folder, "dt_5fold")
+    dt_folder <- file.path(comp_folder, sprintf("dt_%dfold", n_folds))
   }
 
   #-----------------------------------------------------------------------------
