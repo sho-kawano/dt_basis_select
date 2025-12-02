@@ -87,3 +87,6 @@ data/*.zip
 package-lock.json
 results.csv
 results/
+
+# Aggregated multi-config results (can be regenerated)
+results_multi_config/
