@@ -48,7 +48,7 @@ run_dt <- function(comp_no, k, results_dir, model_config, eps = 0.5, n_reps = 1)
   if (k == 1) {
     dt_folder <- file.path(comp_folder, "dt_1fold", sprintf("eps_%.2f", eps))
   } else {
-    dt_folder <- file.path(comp_folder, "dt_5fold")
+    dt_folder <- file.path(comp_folder, sprintf("dt_%dfold", k))
   }
   # Create directory (recursive=TRUE creates eps subdirs for k=1)
   dir.create(dt_folder, showWarnings = FALSE, recursive = TRUE)
