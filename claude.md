@@ -5,9 +5,33 @@ This is a repo for a research project I am conducting on data thinning for model
 ## Coding Context
 I am working on this repo by myself. I would prioritize brevity / clarity and less on production-level software engineering concerns like error-catching.  Informative & concise comments would be appreciated (but avoid verbose comments).
 
-Please be extra careful for making changes that involve nuanced statistical reasoning, evaluating results, etc. If you're unsure, just ask me (I don't mind). Ex: if you're unsure about what goes where in a model call please take a conservative approach. 
+Please be extra careful for making changes that involve nuanced statistical reasoning, evaluating results, etc. If you're unsure, just ask me (I don't mind). Ex: if you're unsure about what goes where in a model call please take a conservative approach.
 
-For tasks that are mostly software-enginnering based, I fully trust your judgement. 
+For tasks that are mostly software-enginnering based, I fully trust your judgement.
+
+**For data analysis tasks:** See `_for_claude/efficient_data_analysis.md` for workflow best practices.
+
+**For parallel processing:** ALWAYS use FORK clusters (`type = "FORK"`). FORK clusters share memory with the parent process and do not require `.export` for variable access. Example:
+```r
+cl <- makeCluster(n_cores, type = "FORK")
+registerDoParallel(cl)
+foreach(i = 1:n) %dopar% {
+  my_function(i, my_var)  # my_var accessible without .export
+}
+stopCluster(cl)
+```
+
+## ⚠️ CRITICAL RULE: NEVER DELETE RESULTS DIRECTORIES
+
+**NEVER use `unlink()`, `rm -rf`, or any method to delete existing `_results_*` directories.**
+
+Results directories contain valuable computational results that take hours to generate. If you need to create a new results directory:
+- ALWAYS create a new, uniquely named directory (e.g., `_results_equal75_v2`, `_results_test_YYYYMMDD`)
+- NEVER reuse existing directory names
+- ASK the user what directory name to use if uncertain
+- Check if a directory exists before proceeding
+
+This rule applies to ALL scripts, including test scripts and re-runs.
 
 ### What needs to be done
 
@@ -27,375 +51,23 @@ Most of the code will be adapted from `dev/dt_choose_covs`. This repo differs in
 
 ## Implementation Tasks
 
-### ✅ Completed - Architecture & Data Pipeline
+### ✅ Completed - Core Infrastructure (Phases 1-4)
 
-**Phase 1: Data Setup & Sampling** ✅
-- ✅ Created `sim_functions/sampling_and_setup.R` with design-based sampling
-- ✅ Implemented `create_X()` function with "population" and "estimated" approaches
-- ✅ Made X configurable via `sim_config$X_approach`
-- ✅ Save X.RDS, z.RDS, d.RDS with PUMA alignment (as lists with explicit sorting)
-- ✅ Updated `esim_helper()` to load new list format
-- ✅ Finalized sampling parameters: `samp_frac=0.0225`, `min_sample_size=30`
-- ✅ Response variable: `medi_cal_qualified = ifelse(POVPIP < 138, 1, 0)`
-- ✅ Tested with 50 comparisons - 0 problematic cases, median SE=3.4%
+All core infrastructure completed and documented in archived sections:
+- ✅ Data pipeline (sampling, function signatures, testing)
+- ✅ Spatial basis function model (Gibbs sampler, validation, convergence)
+- ✅ CA PUMA adjacency matrix (793 edges, rook contiguity)
+- ✅ nbasis selection analysis framework
 
-**Phase 2: Function Signatures & Data Loading** ✅
-- ✅ Updated `run_comparisons.R` (data setup, function calls, commented out model fitting)
-- ✅ Updated `run_dt.R` - loads X/z/d from comparison folder
-- ✅ Updated `summary_dt.R` - loads d from comparison folder
-- ✅ Updated `run_esim.R` - loads X/d from comparison folder
-- ✅ Updated `summary_esim.R` - loads z from comparison folder
-- ✅ Updated `full_data_fit.R` - loads X/z/d from comparison folder
-- ✅ Updated `summary_oracle.R` - loads z/d from comparison folder
-
-**Phase 3: Pipeline Testing** ✅
-- ✅ Tested setup with `test_setup_only.R` (2 comparisons)
-- ✅ Tested full pipeline with `test_pipeline_minimal.R` (DT + ESIM with n_comp=2)
-- ✅ **Full pipeline test with `test_full_pipeline.R` (3 comparisons, Nov 7 2025):**
-  - Configuration: 3 comparisons, 5 epsilon values (0.1, 0.3, 0.5, 0.7, 0.8), 2 repeat counts (1, 3)
-  - Runtime: ~37 seconds total
-    - Setup: <1 second
-    - DT 1-fold: 23.6s (10 configs × 3 comparisons × 3 models)
-    - DT 5-fold: 2.4s (3 comparisons × 5 folds × 3 models)
-    - ESIM: 9.2s (3 comparisons × 100 iterations × 3 models)
-    - Summaries: <2 seconds
-  - Results: 321 rows (297 DT + 24 ESIM)
-  - All methods completed successfully with no errors
-  - Files created: X.RDS, z.RDS, d.RDS per comparison, all method results saved
-- ✅ All data loading verified working correctly
-- ✅ PUMA alignment maintained throughout pipeline
-- ✅ Using placeholder Fay-Herriot model with minimal MCMC (`ndesired=10, nburn=10`) in all three fitting functions:
-  - `full_data_fit.R:42`
-  - `run_dt.R:102-103`
-  - `run_esim.R:64, 114`
-
-**Sampling Configuration (Updated Nov 14, 2025):**
-- Sampling: Simple PPS using PWGTP (no informative sampling)
-- **samp_frac: 0.01 (1%)** - Updated for production based on pilot tests
-- min_sample_size: 30 per PUMA
-- X_approach: "population" (fixed across comparisons)
-- All 281 PUMAs sampled in each comparison
-- **Response: WAGP (annual wages)** - Continuous variable with strong spatial signal
-
-**Response Variable Selection (Updated Nov 2025):**
-- **BREAKTHROUGH:** Continuous responses dominate binary responses for MSE differentiation
-- **Winner:** **WAGP (annual wages)** - 27.7% OD-Oracle differentiation with weak priors 🏆
-  - 2.5× better than best binary response (rents_home: 11%)
-  - Clear U-shaped curve, interior optimum at nbasis=80
-  - Source: `comprehensive_response_search.R` tested 11 responses
-- **Runner-up:** **POVPIP (poverty ratio)** - 16.6% differentiation 🥈
-  - 1.5× better than rents_home
-  - Strong U-shaped curve, optimum at nbasis=60
-- **Best binary:** rents_home - 11.1% differentiation with 2 covariates ⭐
-- **Key insights:**
-  1. **Weak priors essential** (a=b=c=d ≤ 0.001) to induce overfitting → U-shaped curves
-  2. **Continuous > Binary:** Economic variables (wages, poverty) have natural spatial gradients
-  3. **Fewer covariates** → More spatial signal (1-2 covariates optimal)
-  4. **Sampling fraction:** 1% works well (0.5% also tested, more noise)
-- **Test datasets created:** 5 responses in `exploration/testdata_*.RDA` (all 1% sampling)
-  - povpip, rents_home, employed, owns_home, medi_cal_qualified
-- **Notebook:** `exploration/explore_responses.Rmd` for interactive testing
-- **Full documentation:** See `_for_claude/response_hacking.md` for complete exploration history
-
-**Design-based Simulation Initial Analysis (Nov 2025):**
-- **Completed:** Initial testing with `exploration/minimal_dt_test.Rmd`
-- **Goal:** Test multiple response-covariate combinations across 3 direct estimates
-- **Key findings:**
-  1. **Priors:** Very diffuse priors (a=b=c=d ≤ 0.001) essential for non-flat curves
-  2. **Covariates:** Dramatically affect curve shape, even for same response
-  3. **Variability:** OD-Oracle curves vary across direct estimates (DT curves less so)
-  4. **Epsilon:** DT nbasis selection not very sensitive to epsilon (tested 0.2 vs 0.4)
-  5. **Response quality:** rents_home shows better spatial structure than owns_home
-- **Advisor feedback:**
-  - Favor rents_home with **fewer covariates** (2 or even 0)
-  - More spatial variability → easier to see basis function effects
-  - Consider nbasis 10-60 with finer grid (avoid high nbasis instability)
-  - **Scale covariates** (good practice with diffuse priors)
-- **Covariate analysis for rents_home** (`exploration/find_predictive_covariates_rents.R`):
-  - **Strongest predictors:** mean_rooms (R²=0.81), pct_crowded (R²=0.79) ← TOO predictive
-  - **Moderate predictors:** pct_married (R²=0.56), pct_citizen (R²=0.38)
-  - **Weak predictors:** pct_hispanic (R²=0.19), mean_age (R²=0.15), pct_employed (R²=0.15)
-  - **Trade-off:** Strong predictors → flat curves; weak/no predictors → strong spatial signal
-- **Current recommendation for rents_home:**
-  - **0 covariates** (intercept-only): Maximum spatial signal, clearest nbasis differentiation
-  - **OR 1-2 weak covariates** (mean_age, pct_employed): Balance realism with signal
-  - **Avoid:** Strong housing predictors (mean_rooms, pct_crowded) → leave little spatial variance
+**Current Configuration:**
+- State: California (281 PUMAs)
+- Sampling: Equal allocation, n=75 per PUMA
+- Response: employed (employment-to-population ratio)
+- Model: Fixed spatial basis, weak priors (c=d=0.001)
+- MCMC: nburn=1500, ndesired=2000
+- nbasis grid: [3, 6, 9, ..., 60] (20 values)
 
 ---
-
-### ✅ Completed - Spatial Basis Function Model
-
-**Phase 4: Spatial Model Implementation** ✅
-- ✅ Implemented `models/spatial_basis_fh.R` - Gibbs sampler for spatial basis function Fay-Herriot model
-- ✅ Implemented `models/spatial_basis_fh.stan` - Stan version for validation
-- ✅ Fixed critical bug: Variable shadowing in Gibbs sampler (hyperparameters a,b were overwritten by temp vectors)
-- ✅ Validated Gibbs sampler against Stan - estimates agree reasonably well
-- ✅ Performance tested: Gibbs is ~3-3.5× faster than Stan (with nburn=18000 vs Stan warmup=1000)
-- ✅ Convergence testing: 5-chain diagnostics confirm θ converges well (Rhat < 1.01) across nbasis=5-35
-
-**Model Details:**
-- **Specification:** θᵢ = Xᵢ'β + vᵢ + wᵢ
-  - v = S·η, η ~ N(0, τ²Iᵣ) [spatial random effects via basis functions]
-  - w ~ N(0, σ²Iₘ) [IID random effects]
-  - S: m × r spatial basis matrix from Moran's I eigenvectors
-- **Prior (default):** a=b=c=d=1
-  - τ² ~ IG(1, 1) for spatial variance
-  - σ² ~ IG(1, 1) for IID variance
-  - Relatively non-informative prior for variance components
-- **MCMC Settings:**
-  - **NC test data (100 areas):**
-    - Burn-in: 18,000 iterations (production)
-    - Samples: 2,000 iterations
-    - Runtime: ~3-5 seconds per fit (nbasis=5-35)
-    - **Convergence:** Multi-chain diagnostics (5 chains) show θ Rhat < 1.01 across all nbasis values
-    - **Note:** Variance components (τ², σ²) occasionally show Rhat > 1.1 at high nbasis, but small area estimates (θ) consistently converge well
-  - **CA PUMA data (281 areas):**
-    - **Recommended burn-in: 1,500-2,000 iterations** (validated with multi-chain diagnostics)
-    - Samples: 2,000 iterations
-    - **Convergence:** Excellent convergence even at nburn=1500 (all Rhat < 1.01, ESS 1800-10000)
-    - Tested nbasis = 10, 20, 40, 60, 80, 100 (all converge well)
-    - CA data converges much faster than NC - can use shorter burn-in for production
-- **Basis functions:** Use `nbasis` parameter to control number of eigenvectors
-  - **Note:** Maximum nbasis is limited by number of positive eigenvalues (>1e-10) from Moran's I decomposition
-  - NC test data: 37 positive eigenvalues (100 areas) - tested nbasis = 5, 10, 20, 30, 35
-  - CA PUMA data: ~110 positive eigenvalues (281 areas, 793 edges) - tested nbasis = 10-100
-  - Requesting nbasis > available eigenvalues will use all available and trigger warning
-
-**Files:**
-- `models/spatial_basis_fh.R` - Main Gibbs sampler implementation
-- `models/spatial_basis_fh.stan` - Stan implementation for validation
-- `models/mcmc_helper.R` - Helper functions for MCMC
-- **NC test data:**
-  - `models/test_gibbs_convergence.R` - Multi-chain convergence diagnostics (5 chains)
-  - `models/test_gibbs_vs_stan.R` - Timing and validation comparison with Stan
-  - `models/diagnostics.Rmd` - Comprehensive diagnostic report with trace plots, ACF, spatial maps
-- **CA PUMA test data:**
-  - `models/generate_ca_test_sample.R` - Generate test sample from design-based comparison setup
-  - `models/test_ca_gibbs_convergence.R` - Multi-chain convergence diagnostics (5 chains)
-  - `models/test_ca_gibbs_vs_stan.R` - Timing and validation comparison with Stan
-  - `models/diagnostics_ca.Rmd` - Comprehensive diagnostic report for CA data
-
----
-
-### ✅ Completed - Adjacency Matrix for California PUMAs
-
-**Adjacency matrix A has been created and saved**
-
-Created `data/create_puma_adjacency.R` that automatically downloads PUMA shapefiles and generates the spatial adjacency matrix.
-
-**Script:** `data/create_puma_adjacency.R`
-- Tries multiple years (2022, 2021, 2020, 2019, 2018) to find matching vintage
-- Found: **2022 (2020-based PUMAs)** perfectly aligns with population data
-- Validates PUMA ID alignment before proceeding
-- Creates binary adjacency matrix using rook contiguity
-
-**Output:** `data/ca_puma_adjacency.RDA`
-- 281×281 binary adjacency matrix
-- 793 edges, average 5.64 neighbors per PUMA
-- No island PUMAs (all have 2-15 neighbors)
-- Perfectly aligned with `ca_pums_population.rds`
-
-**Usage in models:**
-```r
-load("data/ca_puma_adjacency.RDA")  # Loads A (matrix) and puma_shape (sf object)
-```
-
----
-
-### ✅ Completed - nbasis Selection Analysis
-
-**Single Dataset Analysis for Model Selection** ✅
-- ✅ Created `one_data_analysis.Rmd` - Analysis to test data thinning for selecting optimal nbasis
-- ✅ Compares three MSE metrics across nbasis values (10-100 by increments of 10):
-  1. **OD-Oracle MSE:** Full-data fit evaluated against population truth (benchmark)
-  2. **DT-Oracle MSE:** Thinned-data fit (eps=0.3) evaluated against truth (actual performance)
-  3. **DT MSE:** Unbiased test set estimator (what you'd use in practice, no truth needed)
-- ✅ Uses parallelization (10 cores) for data thinning fits
-- ✅ Implements 3 repetitions per nbasis to reduce variance
-- ✅ Includes both raw MSE plots and normalized [0,1] plots for comparison
-
-**Key Components:**
-- `create_dt_split()`: Single-fold data thinning (z_train, z_test)
-- `calc_dt_mse()`: Unbiased MSE estimator from background.tex with bias correction
-- De-scaling: DT models estimate eps*theta, so divide by eps before evaluating against truth
-- Data alignment: Both test data and truth sorted by PUMA ID
-
-**Purpose:** Validate that data thinning can identify the oracle-optimal nbasis using only train/test splits
-
----
-
-### ✅ RESOLVED - Response Variable Selection
-
-**Status:** COMPLETED - Found excellent configurations for data thinning testing
-
-**Solution:** Comprehensive response search (Nov 2025) identified continuous responses as superior
-
-**Final Configurations:**
-
-| Response       | Type       | Covariates              | samp_frac  | MSE Diff  | Best nbasis | Quality       |
-| -------------- | ---------- | ----------------------- | ---------- | --------- | ----------- | ------------- |
-| **WAGP**       | Continuous | mean_age                | 0.005      | **27.7%** | 80          | ⭐⭐⭐ Excellent |
-| **POVPIP**     | Continuous | mean_age                | 0.005-0.01 | **16.6%** | 60          | ⭐⭐ Excellent  |
-| **rents_home** | Binary     | pct_asian, pct_bachelor | 0.01       | 11.1%     | 50          | ⭐ Good        |
-| employed       | Binary     | mean_age                | 0.005      | 3.1%      | 70          | Moderate      |
-| owns_home      | Binary     | 4 covariates            | 0.0075     | 2.1%      | 10          | Weak          |
-
-**Key findings:**
-- Continuous responses (WAGP, POVPIP) provide 2-3× better differentiation than binary
-- Weak priors (a=b=c=d=0.001) essential for U-shaped curves
-- All show clear interior optima (not at boundaries)
-- **Recommendation:** Use WAGP or POVPIP for production runs
-
-**Test datasets created:**
-- `exploration/testdata_*.RDA` - 5 responses with 1% sampling, ready for testing
-- `exploration/explore_responses.Rmd` - Interactive notebook for quick testing
-- `exploration/TEST_DATASETS_README.md` - Documentation with recommendations
-
-**Pilot Test Framework (Nov 2025):**
-- ✅ Tested multiple response variables and model configurations (archived in `exploration/archive_pilots/`)
-- ✅ Key finding: Fixed spatial effects work better than random effects for model selection
-- **Status:** COMPLETED - Led to decision to use rents_home with fixed spatial basis
-
-**Initial Analysis (Nov 16, 2025):**
-- ✅ Ran 10 comparisons for both WAGP and rents_home with fixed spatial effects
-- ✅ Analyzed oracle MSE consistency across methods (DT, WAIC, DIC, ESIM)
-- **Key finding:** Random spatial effects produce inconsistent optimal nbasis across comparisons
-- **Decision:** Proceed with rents_home + fixed spatial effects (NIKE swoosh pattern, interior minima)
-- **Problem identified:** Optimal nbasis varies widely across comparisons (SD~26) - need more consistent signal
-- **Results:** See `initial_conclusion/` for detailed analysis and plots
-
----
-
-### 📁 Directory Cleanup (Nov 2025)
-
-**Archived directories:**
-- `archive/` - Old run_comparisons scripts for abandoned configurations
-- `archive_results/` - Results from abandoned configurations (_results_wagp_random, etc.)
-- `exploration/archive_pilots/` - Old pilot test directories
-- `exploration/archive_scripts/` - Old exploration scripts and test datasets
-- `exploration/archive_notebooks/` - Interactive Rmd files for exploratory testing
-- `oracle_consistency_analysis/archive_response_search/` - Intermediate response screening results
-
-**Removed files (Nov 2025 cleanup):**
-- `models/nc_*.RDS/RDA` - NC test data (can regenerate if needed)
-- `models/diagnostics.html` - Diagnostic report (can regenerate)
-- `analyze_per_dataset_agreement.R` - Intermediate analysis script
-- `analyze_per_dataset_proximity.R` - Intermediate analysis script
-
-**Active directories:**
-- `_results_pubcov/` - 10 comparisons with PUBCOV + equal_50 (for advisor report)
-- `_results_rents/` - 10 comparisons with rents_home, 6 sampling configs (for advisor report)
-- `initial_conclusion/` - Analysis from 10-comparison test (Nov 16, 2025)
-- `oracle_consistency_analysis/` - Sampling design consistency tests (Nov 2025)
-
----
-
-### ✅ Oracle Consistency Analysis (Nov 2025)
-
-**Problem:** rents_home with fixed spatial effects shows interior minima (NIKE swoosh ✓) but **inconsistent optimal nbasis** across comparisons (SD~26, range 20-90)
-
-**Goal:** Find response variable and sampling design that produces **consistent optimal nbasis** across comparisons to enable reliable method comparison
-
-**Approach:** Expanded candidate response search, tested PUBCOV (Public Health Coverage) with multiple sampling schemes
-
-**Status:** ✅ COMPLETED - Found winning configuration!
-
-**Winner: PUBCOV + equal_50** 🏆
-
-**Test configurations (10 comparisons each):**
-1. **baseline:** samp_frac=0.01, min=30 (proportional allocation)
-2. **equal_30:** equal allocation with n=30 per PUMA
-3. **equal_50:** equal allocation with n=50 per PUMA
-**Results:**
-
-| Scheme    | MSE Variation | SD(nbasis) | Mean nbasis | Boundary % | **Result**        |
-|-----------|---------------|------------|-------------|------------|-------------------|
-| equal_50  | **19.5%**     | **13.2** ⭐ | 38          | **0%** ✓   | ✓✓✓ **PASS ALL**  |
-| baseline  | 16.3%         | 14.0       | 38          | **0%** ✓   | ✓✓✓ **PASS ALL**  |
-| equal_30  | 27.6% ⭐       | 13.5       | 25          | 30% ✗      | **FAIL**          |
-
-**Key findings:**
-- **PUBCOV (Public Health Coverage)** is first response variable to pass all filters
-- **equal_50** provides best balance: 19.5% MSE differentiation, SD=13.2, no boundary selections
-- equal_30 has highest MSE signal (27.6%) but 30% boundary selections (too noisy at n=30)
-- Optimal nbasis range for equal_50: 20-50 (consistent across comparisons)
-
-**Recommendation for production runs:**
-- **Response variable:** PUBCOV (public health insurance coverage, binary)
-- **Sampling scheme:** equal_50 (equal allocation, n=50 per PUMA)
-- **Model config:** Intercept-only (no covariates), fixed spatial effects, weak priors (a=b=c=d=0.001)
-- **nbasis range:** 10-100 by increments of 10
-
-**Files:**
-- `oracle_consistency_analysis/test_pubcov_detailed.R` - Main test script
-- `oracle_consistency_analysis/test_pubcov_equal30.R` - Additional equal_30 test
-- `oracle_consistency_analysis/analyze_pubcov_results.R` - Metrics computation
-- `oracle_consistency_analysis/plot_pubcov_curves.R` - Visualization
-- `oracle_consistency_analysis/response_search/pubcov_detailed/` - All results and plots
-
-**Phase 2: Alternative Response Search** (Ongoing)
-- Continue exploring alternative responses from other states (TX, NY, IL, LA, NJ)
-- Test additional CA response variables with equal_50 sampling
-- Goal: Find multiple response variables that pass filters for robustness testing
-
-**Next Steps:**
-- ~~Run full pipeline test: 10 comparisons with DT + ESIM methods to validate PUBCOV end-to-end~~
-- ~~If successful, proceed to production: 50-70 comparisons for final method comparison~~
-
----
-
-### ⚠️ CRITICAL FINDING: Flat Oracle MSE Curves (Nov 2025)
-
-**Status:** ❌ **PROJECT PAUSED** - Response variables show insufficient steepness for meaningful method comparison
-
-**What happened:**
-1. Ran 10 comparisons for PUBCOV + equal_50 (passed v1 screening criteria)
-2. Ran 10 comparisons for rents_home with 6 sampling configurations
-3. **Discovered:** Oracle MSE curves are **flat** across all tested configurations
-
-**Flatness Metrics (PUBCOV):**
-- MSE penalty at ±10 nbasis: **3.3%** (target: >5%)
-- MSE penalty at ±20 nbasis: **7.1%** (should be >10%)
-- Models within 5% of optimal: **3.6 / 10** (too many)
-- **Implication:** Methods can disagree by ±20-30 nbasis units yet have nearly identical MSE (~5% penalty)
-
-**Method Performance (PUBCOV, 10 comparisons):**
-- 1-fold DT (ε=0.5): 70% within ±20 of oracle, 5.1% MSE penalty
-- 5-fold DT: 50% within ±20, 5.2% penalty
-- DIC: 80% within ±20, 6.5% penalty
-- ESIM: 50% within ±20, 5.3-5.6% penalty
-
-**Why this is problematic:**
-- Cannot meaningfully differentiate method quality when cost of being wrong is negligible
-- Methods work "well enough" but impossible to identify which is better
-- Defeats the purpose of method comparison study
-
-**Results Available for Advisor Report:**
-- `_results_pubcov/` - 10 comparisons, all methods
-- `_results_rents/` - 10 comparisons, 6 sampling configurations
-- `analyze_oracle_flatness.R` - Post-mortem analysis
-- Plots show flat curves across all configurations
-
-**Updated Screening Criteria:**
-- See `_for_claude/screening_criteria_v2.md` for revised criteria
-- **Added:** Steepness requirement (>5% penalty at ±10 units)
-- **Removed:** Spatial correlation pre-screening (uninformative)
-
-**Possible Explanations:**
-1. Spatial basis function model is robust to nbasis mis-specification in 20-100 range
-2. These response variables lack sufficient spatial signal
-3. Need fundamentally different modeling approach
-
-**Decision:**
-- Report findings to advisors (flat curves = valuable negative result)
-- Potentially pivot to studying robustness of spatial basis models (different research question)
-- Or explore alternative model classes / response variables from other data sources
-
-**Files:**
-- `analyze_oracle_flatness.R` - Post-mortem flatness analysis
-- `analyze_per_dataset_proximity.R` - REMOVED (housekeeping)
-- `_results_pubcov/oracle_overlay_raw.png` - Visual proof of flatness
-- `_results_rents/oracle_faceted_raw.png` - All 6 sampling configs (all flat)
 
 ---
 
@@ -463,6 +135,206 @@ Expected optimal: nbasis~15-16
 1. Run full pilot (10-20 comparisons) with equal_75 + all methods (DT 1-fold, DT 5-fold, WAIC, DIC, ESIM)
 2. Validate methods can identify optimal nbasis~15-16
 3. If successful → scale to production (50-70 comparisons)
+
+---
+
+### ⚠️ CRITICAL ISSUE DISCOVERED: Equal Allocation May Favor DIC/WAIC (Nov 2025)
+
+**Problem Identified in 50-Comparison Study (`analysis/equal_75_results.html`):**
+
+After running 50 comparisons with equal_75 configuration, discovered that **DIC/WAIC vastly outperformed all DT methods**:
+
+| Method | Mean Dev | MAD | Ranking |
+|--------|----------|-----|---------|
+| DIC | -0.2 | 4.0 | 🥇 Best |
+| WAIC | +0.4 | 4.9 | 🥈 2nd |
+| DT 5-fold MSE | -1.6 | 5.2 | 4th |
+| DT 1-fold MSE | -3.7 | 5.6 | 7th |
+| ESIM standard | -6.3 | 7.3 | Worst |
+
+**Root Cause Hypothesis:**
+Equal allocation (n=75 per PUMA) creates **too consistent oracle signal** (MSE variation = 31.5%):
+- Direct estimates don't vary much across comparisons
+- **No penalty for overfitting** to a specific sample
+- DIC/WAIC can overfit without consequence → artificially dominate
+- DT systematically underestimates (negative mean_dev) because it trains on less data
+- This design may not provide a fair test of DT vs. likelihood-based methods
+
+**Multi-Config Investigation (Nov 2025):**
+
+Ran 6 sampling designs (20 comparisons each) to find one with **higher MSE variation** that properly penalizes overfitting:
+
+| Config | MSE Var | SD | Boundary % | Assessment |
+|--------|---------|-----|------------|------------|
+| equal_75 | 31.5% | 2.7 | 0% | ⚠️ Too consistent |
+| equal_40 | **47.1%** ↑ | 3.7 | 5% | More variability, slight boundary |
+| equal_50 | **44.1%** ↑ | 2.7 | 0% | Good variability, no boundary |
+| prop_1pct | 37.3% | 4.6 | 5% | Moderate increase |
+
+**Implication:**
+- **equal_50** might provide fairer comparison (44% MSE var, low SD, no boundary)
+- Need to re-run full method comparison on equal_40 or equal_50 to see if DT performs better
+- Goal: Find design with enough variability to differentiate methods fairly while maintaining good oracle properties
+
+**Key Research Question:**
+Compare how DIC/WAIC/DT methods perform across different sampling designs (equal_40, equal_50, equal_75, prop_0.5pct, prop_1pct, prop_2pct) to understand which design creates fair conditions for method comparison.
+
+**See:** `analysis/equal_75_results.Rmd` lines 200-211 for detailed discussion
+
+---
+
+### ✅ Six-Dimensional Analysis Framework (Nov 29, 2025)
+
+**Status:** ✅ **COMPLETE** - Comprehensive analysis identifying when and how DT provides value
+
+Developed unified framework to compare methods across sampling designs using 6 key dimensions:
+
+**The Six Dimensions:**
+
+1. **Signal-to-Noise (CV):** sqrt(d) / |z| - direct estimate quality
+2. **Oracle Signal (MSE variation %):** How different models perform - higher = easier selection
+3. **Variance Heterogeneity (d_ratio):** max(d)/min(d) - affects benefit of DT averaging
+4. **Oracle Stability (oracle SD):** Variability of optimal nbasis across comparisons
+5. **Model Complexity Support (mean nbasis):** What complexity the data can support
+6. **Selection Task Difficulty:** oracle_SD / (MSE_var / 100) - **KEY PREDICTOR**
+
+**Complete Results (6 configs, 20 comparisons each):**
+
+| Config | CV | MSE_var | d_ratio | Oracle_SD | Mean_nbasis | Difficulty | DIC | WAIC | DT ε=0.5 n=1 | DT ε=0.5 n=5 | DT ε=0.7 n=5 |
+|--------|-----|---------|---------|-----------|-------------|------------|-----|------|--------------|--------------|--------------|
+| equal_50 | 0.18 | 311 | 5.4 | 2.7 | 14.3 | **0.88** | 6.9 | 6.45 | 7.95 | 7.65 | **6.15** ⭐ |
+| equal_75 | 0.15 | 255 | 5.0 | 2.7 | 16.4 | **1.04** | **5.1** ⭐ | 6.60 | 10.05 | 7.80 | 7.05 |
+| equal_40 | 0.21 | 307 | 6.8 | 3.7 | 13.1 | **1.20** | 5.7 | **5.55** ⭐ | 8.10 | 8.10 | 6.90 |
+| prop_0.5pct | 0.24 | 280 | 13.4 | 4.2 | 11.3 | **1.51** | **7.5** ⭐ | 7.95 | **6.45** ⭐ | 8.40 | 8.25 |
+| prop_1pct | 0.17 | 293 | 6.5 | 4.6 | 14.7 | **1.56** | **5.4** ⭐ | 7.05 | 7.95 | 6.90 | 7.20 |
+| prop_2pct | 0.12 | 194 | 5.5 | 8.8 | 20.4 | **4.54** | 9.3 | 11.4 | 10.20 | **7.65** ⭐ | 8.40 |
+
+**Summary Statistics (Mean MAD across configs):**
+
+| Method | Mean MAD | Range | Assessment |
+|--------|----------|-------|------------|
+| **DIC** | **6.65** | 4.20 | Best mean performance |
+| **DT ε=0.7 n=5** | 7.32 | 2.25 | **Best balance** (competitive mean, very stable) |
+| WAIC | 7.50 | 5.85 | Middle performance, least stable |
+| **DT ε=0.5 n=5** | 7.75 | **1.50** | **Most stable!** |
+| DT ε=0.5 n=1 | 8.45 | 3.75 | Less stable without averaging |
+
+**Key Findings:**
+
+1. **Difficulty score strongly predicts ALL method performance:**
+   - cor(Difficulty, WAIC_MAD) = **0.950**
+   - cor(Difficulty, DT_MAD) = 0.874
+   - cor(Difficulty, DIC_MAD) = 0.804
+
+2. **The Precision Paradox:** Lower CV (better precision) → harder selection
+   - More data → flatter oracle curves → higher oracle instability
+   - prop_2pct: CV=0.12 (best precision), Difficulty=4.54 (hardest!)
+
+3. **DT provides stability insurance, not dominance:**
+   - **Easy regimes** (Difficulty < 2): DIC/WAIC win or tie (5/6 configs)
+   - **Hard regime** (Difficulty > 4): DT degrades less (7.65 vs 9.3/11.4)
+   - DT ε=0.5 n=5: Most stable (range 1.50) across ALL regimes
+   - DT ε=0.7 n=5: Best balance (mean 7.32, range 2.25)
+
+4. **Heterogeneity affects which DT config works:**
+   - **High heterogeneity** (prop_0.5pct, d_ratio=13.4): **n=1 wins** (averaging hurts)
+   - **Low heterogeneity** (others, d_ratio=5-7): **n=5 wins** (averaging helps)
+   - eps=0.3 consistently fails (excluded from analysis)
+
+5. **Winners by regime:**
+   - equal_50 (0.88): DT ε=0.7 n=5
+   - equal_75 (1.04): DIC
+   - equal_40 (1.20): WAIC
+   - prop_0.5pct (1.51): DIC (but DT ε=0.5 n=1 close: 6.45 vs 7.50)
+   - prop_1pct (1.56): DIC
+   - prop_2pct (4.54): DT ε=0.5 n=5 (clear win)
+
+**The Honest Story:**
+DT doesn't dominate but provides **robustness across difficulty regimes**. Pay ~0.7-1.1 MAD penalty on average for stability guarantee. In hard regimes where DIC/WAIC struggle, DT maintains performance.
+
+**Scripts:**
+- `analyze_six_dimensions.R` - Full six-dimensional analysis
+- `full_dimensions_table.R` - Complete results table
+- `diagnose_zd_structure.R` - z/d characteristic analysis
+
+---
+
+### ✅ 10-Config Comprehensive Analysis (Nov-Dec 2025)
+
+**Status:** ✅ **COMPLETE** - Final comprehensive comparison across 10 sampling designs
+
+After the 6-config exploratory analysis, expanded to **10 sampling designs** (4 equal allocation + 6 proportional PPS) to provide comprehensive understanding of when DT provides value relative to DIC/WAIC.
+
+**The 10 Configurations:**
+
+| Config | Type | Parameter | Mean n/PUMA | Comparisons |
+|--------|------|-----------|-------------|-------------|
+| **equal_40** | Equal | n=40 | 40 | 20 |
+| **equal_50** | Equal | n=50 | 50 | 20 |
+| **equal_75** | Equal | n=75 | 75 | 20 |
+| **equal_100** | Equal | n=100 | 100 | 20 |
+| **prop_0.5pct** | PPS | 0.5% | ~85 | 20 |
+| **prop_1pct** | PPS | 1.0% | ~170 | 20 |
+| **prop_1p25pct** | PPS | 1.25% | ~212 | 20 |
+| **prop_1p5pct** | PPS | 1.5% | ~255 | 20 |
+| **prop_1p75pct** | PPS | 1.75% | ~297 | 20 |
+| **prop_2pct** | PPS | 2.0% | ~340 | 20 |
+
+**Key Results:**
+
+**DT vs DIC Performance:**
+- **DT Wins:** 7/10 configs (70%)
+- **DIC Wins:** 3/10 configs (30%)
+- **Largest DT advantage:** prop_1p75pct (wins by **4.65 MAD**)
+- **Best overall performance:** prop_1p25pct (DT ε=0.7 n=5: **MAD=4.35**)
+
+**Pattern Summary:**
+- **DT dominates** proportional allocation (6/6 prop configs)
+- **DIC excels** in mid-range equal allocation (equal_40, equal_75, prop_1pct)
+- **DT advantages larger in magnitude** (up to 4.65) than DIC advantages (max 1.50)
+
+**Winner by Config:**
+
+| Config | Winner | MAD | DT Gap |
+|--------|--------|-----|--------|
+| prop_1p75pct | DT ε=0.5 n=5 | 5.25 | **-4.65** ⭐⭐⭐ |
+| equal_100 | DT ε=0.7 n=3 | 6.75 | **-3.90** ⭐⭐⭐ |
+| prop_2pct | DT ε=0.5 n=5 | 7.65 | -1.65 |
+| prop_1p5pct | DT ε=0.5 n=3 | 5.25 | -1.05 |
+| prop_0.5pct | DT ε=0.5 n=1 | 6.45 | -1.05 |
+| equal_50 | DT ε=0.7 n=5 | 6.15 | -0.75 |
+| prop_1p25pct | DT ε=0.7 n=5 | **4.35** | -0.60 |
+| equal_40 | WAIC | 5.55 | +1.20 |
+| equal_75 | DIC | 5.10 | +1.20 |
+| prop_1pct | DIC | 5.40 | +1.50 |
+
+**Final Conclusion:**
+DT provides substantial value in most sampling regimes, especially proportional allocation and high sample sizes. While not universally dominant, DT wins significantly more often (70%) and with larger magnitude (up to 4.65 vs max 1.50 for DIC). The "sweet spot" is **prop_1p25pct** where DT achieves the best performance across all configs.
+
+**Files Generated:**
+- `test_sampling_designs_10configs.R` - Main execution script (runs all 10 configs)
+- `aggregate_additional_configs.R` - Aggregates 4 new configs into unified dataset
+- `analyze_all_dt_configs.R` - Comprehensive analysis (top 3, DT vs DIC gap)
+- `results_multi_config/dt_all_10configs.RDS` - All DT results
+- `results_multi_config/oracle_all_10configs.RDS` - All oracle/DIC/WAIC results
+- **`COMPREHENSIVE_SUMMARY_10_CONFIGS.md`** - Full results documentation
+- **`REPRODUCTION_GUIDE.md`** - Complete reproduction instructions
+
+**Results Directories:**
+```
+_results_equal40_comparison/
+_results_equal50_comparison/
+_results_equal75_rerun/
+_results_equal100_comparison/
+_results_prop0.5pct_comparison/
+_results_prop1pct_comparison/
+_results_prop1p25pct_comparison/
+_results_prop1p5pct_comparison/
+_results_prop1p75pct_comparison/
+_results_prop2pct_comparison/
+```
+
+**Note:** ESIM results not available for any configs (skipped during aggregation).
 
 ---
 
@@ -606,6 +478,40 @@ Some ways to benchmark using OD-Oracle MSE:
 2. Selected model: which model would be chosen based on each method
 3. Ranking: did the ranking of the method agree with OD-Oracle based on Kendall's Tau or other similarity metrics?
 
+---
 
+## Technical Notes
 
+### Working with results.RDS / results.csv
 
+**Important:** Always use tolerance for floating point comparisons with epsilon values:
+```r
+# WRONG (will find 0 rows):
+filter(epsilon == 0.6)
+
+# CORRECT:
+filter(abs(epsilon - 0.6) < 0.001)
+```
+
+**Data structure:**
+- `results.RDS` and `results.csv` contain the same data (different formats)
+- Located in `_results_*/` directories
+- Key columns: `comp_no`, `method`, `nbasis`, `metric`, `epsilon`, `n_reps_used`
+- DT 5-fold rows have `epsilon = NA` and `n_reps_used = NA`
+
+**Common analysis patterns:**
+```r
+# Get oracle selections per comparison
+oracle_selections <- results %>%
+  filter(method == "OD-Oracle MSE") %>%
+  group_by(comp_no) %>%
+  slice_min(metric, n = 1, with_ties = FALSE)
+
+# Get method selections with deviations
+deviations <- results %>%
+  filter(method != "OD-Oracle MSE") %>%
+  group_by(comp_no, method, epsilon, n_reps_used) %>%
+  slice_min(metric, n = 1, with_ties = FALSE) %>%
+  left_join(oracle_selections, by = "comp_no") %>%
+  mutate(deviation = selected_nbasis - oracle_nbasis)
+```
