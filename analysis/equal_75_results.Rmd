@@ -1,0 +1,281 @@
+---
+title: "Results from Equal Allocation n=75 Design"
+output: html_document
+date: "2025-11-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+suppressPackageStartupMessages({
+  library(tidyverse)
+})
+```
+
+```{r load_result}
+# Load results
+setwd("~/dev/dt_design_based_comp")
+results <- readRDS("_results_ca_full_comparison/results.RDS") %>%
+  mutate(epsilon=round(epsilon, 1)) %>%
+ filter((loss_function !="predictive_NLL") | is.na(loss_function)) %>%
+ filter(model!="D.Est") %>%
+ filter(!is.na(nbasis))
+
+# Get oracle selections per comparison
+oracle_selections <- results %>%
+  filter(method_name == "oracle") %>%
+  group_by(comp_no) %>%
+  slice_min(metric, n = 1, with_ties = FALSE) %>%
+  select(comp_no, oracle_nbasis = nbasis)
+
+# Join with all methods and calculate deviations
+deviations <- results %>%
+  filter(method_name !="oracle") %>%
+  group_by(method, comp_no, method_name, loss_function, epsilon, n_reps_used) %>%
+  slice_min(metric, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(method, comp_no, method_name, loss_function, epsilon, n_reps_used, selected_nbasis = nbasis) %>%
+  left_join(oracle_selections, by = "comp_no") %>%
+  mutate(deviation = selected_nbasis - oracle_nbasis,
+         abs_deviation = abs(deviation))
+```
+
+# Background 
+
+We are benchmarking against the Observed Data Oracle MSE (the realized MSE for a given dataset). I have still questions about whether this is actually the right quantity to be benchmarking against discussions in the Bates, et.al (2023) paper. I wonder if something that is averaged across different direct estimates (Finite Population Oracle) would be better in general. 
+
+ 
+**OD Oracle Optimal Basis Distribution (C=50 Comparions)**
+
+```{r fig.height=3, fig.width=5}
+table(oracle_selections$oracle_nbasis) %>% barplot(main="")
+```
+
+Here are the oracle MSE curves across 50 direct estimates (the minimum is shown as a point):
+
+
+```{r fig.height=3, fig.width=5}
+tmp_df = results %>%
+  filter(method_name == "oracle")
+
+tmp_df %>% 
+  ggplot(aes(x=nbasis, y=metric)) + 
+  geom_line(aes(group=comp_no), alpha=0.4, color="darkgreen") + 
+  geom_point(data=tmp_df %>% group_by(comp_no) %>% filter(min(metric)==metric), 
+             color="darkgreen") #+
+  # stat_summary(aes(group = 1), fun = mean, geom = "line",
+  #              color = "blue", linewidth = 1.2)
+```
+
+
+***
+
+# ‼ Overall Results ‼
+
+Here is the overall result from the comparison study. For DT Single-Fold, I chose the best performing $\epsilon=0.6$ with 3 repeats. 
+
+```{r}
+# Summary statistics by method (collapsing epsilon/n_reps for DT)
+overall <- deviations %>%
+  filter((epsilon==0.6 & n_reps_used==3) |  is.na(epsilon)) %>% 
+  group_by(method) %>%
+  summarise(
+    mean_dev = round(mean(deviation), 1),
+    sd_dev = round(sd(deviation), 1),
+    mean_abs_dev = round(mean(abs_deviation), 1),
+    median_abs_dev = round(median(abs_deviation), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(mean_abs_dev)
+overall %>% 
+  knitr::kable()
+```
+
+We can see that outside of the standard empirical simulation study, all of the methods do pretty comparably. 5-fold data thinning actually does pretty good here. 
+
+If you choose the standard $\epsilon=0.5$ with 3 repeats, Single-Fold Data Thinning Falls down the rankings: 
+
+```{r}
+# Summary statistics by method (collapsing epsilon/n_reps for DT)
+overall <- deviations %>%
+  filter((epsilon==0.5 & n_reps_used==3) |  is.na(epsilon)) %>% 
+  group_by(method) %>%
+  summarise(
+    mean_dev = round(mean(deviation), 1),
+    sd_dev = round(sd(deviation), 1),
+    mean_abs_dev = round(mean(abs_deviation), 1),
+    median_abs_dev = round(median(abs_deviation), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(mean_abs_dev)
+overall %>% 
+  knitr::kable()
+```
+
+
+```{r fig.height=8, fig.width=9}
+# Prepare data for each method
+# 1. Oracle (OD-Oracle MSE)
+oracle <- results %>%
+  filter(method_name == "oracle") %>%
+  select(comp_no, nbasis, value = metric) %>%
+  mutate(method = "OD-Oracle MSE")
+
+# 2. WAIC
+waic <- results %>%
+  filter(method_name == "waic") %>%
+  select(comp_no, nbasis, value = metric) %>%
+  mutate(method = "WAIC")
+
+# 3. DIC
+dic <- results %>%
+  filter(method_name == "dic") %>%
+  select(comp_no, nbasis, value = metric) %>%
+  mutate(method = "DIC")
+
+# 4. DT 5-fold (use MSE loss)
+dt5 <- results %>%
+  filter(method_name == "dt_5fold", loss_function == "MSE") %>%
+  select(comp_no, nbasis, value = metric) %>%
+  mutate(method = "DT 5-fold")
+
+# 5. DT 1-fold (eps=0.3, 3 reps, MSE loss)
+dt1_02 <- results %>%
+  filter(method_name == "dt_1fold", epsilon == 0.2, n_reps_used == 3, loss_function == "MSE") %>%
+  select(comp_no, nbasis, value = metric) %>%
+  mutate(method = "DT 1-fold (eps=0.2)")
+
+
+dt1_04 <- results %>%
+  filter(method_name == "dt_1fold", epsilon == 0.4, n_reps_used == 3, loss_function == "MSE") %>%
+  select(comp_no, nbasis, value = metric) %>%
+  mutate(method = "DT 1-fold (eps=0.4)")
+
+# 6. DT 1-fold (eps=0.6, 3 reps, MSE loss)
+dt1_06 <- results %>%
+  filter(method_name == "dt_1fold", epsilon == 0.6, n_reps_used == 3, loss_function == "MSE") %>%
+  select(comp_no, nbasis, value = metric) %>%
+  mutate(method = "DT 1-fold (eps=0.6)")
+
+# 7. ESIM Standard
+esim_std <- results %>%
+  filter(method_name == "esim_standard") %>%
+  select(comp_no, nbasis, value = metric) %>%
+  mutate(method = "ESIM Standard")
+
+# 8. ESIM Data Fission
+esim_fis <- results %>%
+  filter(method_name == "esim_fission") %>%
+  select(comp_no, nbasis, value = metric) %>%
+  mutate(method = "ESIM Data Fission")
+
+# Combine all methods
+all_methods <- bind_rows(oracle, waic, dic, dt5, 
+                         dt1_02, dt1_04, dt1_06, esim_std, esim_fis)
+
+# Get number of comparisons
+n_comp <- length(unique(all_methods$comp_no))
+
+# Create faceted plot by METHOD (each method in its own panel)
+# Individual comparisons = light gray lines, Average = bold blue line
+ggplot(all_methods, aes(x = nbasis, y = value)) +
+  geom_line(aes(group = comp_no), alpha = 0.25, color = "gray60", linewidth = 0.5) +
+  stat_summary(aes(group = 1), fun = mean, geom = "line",
+               color = "blue", linewidth = 1.2) +
+  facet_wrap(~method, ncol = 3, scales = "free_y") +
+  labs(
+    title = sprintf("All Methods: Individual vs Average (%d comparisons)", n_comp),
+    subtitle = "Gray = individual comparisons, Blue = average. Raw values (free y-axis per method)",
+    x = "Number of basis functions",
+    y = "Score"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 12),
+    strip.text = element_text(face = "bold", size = 10),
+    axis.text = element_text(size = 8)
+  )
+
+```
+
+### Thoughts on results
+
+I wonder if our current survey design favors methods like DIC and WAIC in some way. 
+If the oracle signal is very consistent, then that means that direct estimates don't differ much from one to another. So there's no penalty for overfitting to a given sample. 
+
+Given the equal allocation survey design, DT also seems to better when $\epsilon$ is higher (which we previously have not seen). 
+
+I wonder if there's something we can do to:
+
+1. Keep oracle MSE curves 'relatively' constant 
+2. But increase more variability in the sampling that penalizes overfitting to a given direct estimate
+
+
+## DT Single-Fold: Impact of Epsilon & Repeats
+
+
+```{r }
+# Also show best DT config by epsilon/reps
+dt_single_all <- deviations %>%
+  filter(method_name %in% c("dt_1fold")) %>% 
+  group_by(method_name, loss_function, epsilon, n_reps_used) %>%
+  summarise(
+    mean_dev= round(mean(deviation), 1),
+    sd_dev=round(sd(deviation), 1),
+    mean_abs_dev = round(mean(abs_deviation), 1),
+    median_abs_dev = round(median(abs_deviation), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(mean_abs_dev)
+```
+
+
+
+```{r fig.width=9, fig.height=3}
+dt_single_all %>% 
+  mutate(n_reps_used=as.factor(n_reps_used)) %>% 
+  ggplot(aes(x=epsilon, y=mean_abs_dev, colour = n_reps_used)) + geom_point() + geom_line() +
+  geom_point(size=4, color="navy", shape=5, data=dt_single_all %>% 
+               group_by(method_name, loss_function,  n_reps_used) %>% 
+               filter(min(mean_abs_dev)==mean_abs_dev)) +
+  facet_wrap(loss_function~.)  + 
+  ylab("Mean Abs. Deviation from OD-Oracle Basis")+
+  theme_bw()+
+  ggtitle("DT Single-Fold MAD of Basis Selection Across Epsilon & Repeats")
+```
+
+
+When MSE is the loss function, we can see that, for the most part, there is agreement that the optimal epsilon is arond 0.6 (or higher depending on the number of reps). The LL based evaluation has shifting optimal epsilon. 
+
+For some reason, the 3 repeat cases have lower deviations from the oracle than 5 repeat cases. This is a bit unexpected.  
+
+Below is a plot showing the distribution of the basis deviations from the oracle for DT with MSE. 
+We can see that DT underestimates the number of basis needed, especially for lower epsilon. This makes sense to me given that DT is fitting with less information. We can see that the underestimation reduces as $\varepsilon \to 1$ but so does the variance of deviations.
+
+Thus, we can see the inherent trade off with DT here. 
+
+```{r}
+deviations %>%
+  filter(method_name =="dt_1fold" & loss_function=="MSE") %>% 
+  mutate(epsilon=as.factor(epsilon)) %>% 
+  ggplot(aes(x=epsilon, y=deviation)) + 
+  geom_boxplot() +
+  geom_abline(slope = 0, linetype=2, color="red") +
+  facet_grid(n_reps_used~.) + 
+  ggtitle("Deviations from OD-Oracle Basis across 50 Comparisons (faceted by repeats)")
+```
+
+
+## Looking at deviations from other methods
+
+```{r fig.width=8, fig.height=3}
+deviations %>%
+  filter(is.na(epsilon)) %>% 
+  ggplot(aes(x=method, y=deviation)) + 
+  geom_boxplot() +
+  geom_abline(slope = 0, linetype=2, color="red") +
+  ggtitle("Deviations from OD-Oracle Basis across 50 Comparisons")
+```
+
+We can see that outside of empirical simulations (ESIM), all of the other methods including the 5 fold data thinning, seem to be unbiased WRT to the oracle basis.
+
+
