@@ -77,12 +77,11 @@ summary_oracle <- function(comp_no, results_dir){
 
   # Compute posterior means for each model
   estimates = sapply(post_samples, function(x){x %>% colMeans()})
-  estimates = cbind(estimates, z)
 
   # Calculate MSE against truth (not z!)
   mse_df = data.frame(comp_no=comp_no,
-                      model=c(model_names, "D.Est"),
-                      nbasis = c(nbasis_values, NA),
+                      model=model_names,
+                      nbasis = nbasis_values,
                       mse_true=colMeans((estimates-truth)^2))
   waic_df = data.frame(comp_no=comp_no,
                       model=model_names,

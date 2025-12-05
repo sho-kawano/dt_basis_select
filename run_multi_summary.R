@@ -118,7 +118,7 @@ cat("=== ORACLE ANALYSIS ===\n\n")
 # Compute oracle properties for each config
 compute_oracle_properties <- function(oracle_df, config_name) {
   oracle_models <- oracle_df %>%
-    filter(model != "Direct" & model != "D.Est") %>%
+    filter(model != "Direct") %>%
     mutate(nbasis = as.numeric(gsub("nbasis_", "", model)))
 
   oracle_optimal <- oracle_models %>%
