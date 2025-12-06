@@ -1,23 +1,29 @@
 #!/usr/bin/env Rscript
-# Aggregate 4 additional configs (prop1p25pct, prop1p5pct, prop1p75pct, equal_100)
-# Skips ESIM since none have it
+# Aggregate all 10 configs from scratch
+# No dependency on old results_multi_config files
 
 library(parallel)
 library(doParallel)
 library(tidyverse)
 
-# Config mappings
-new_configs <- list(
-  list(name = "prop_1p25pct", dir = "_results_prop1p25pct_comparison", n_comp = 20, n_cores = 8),
-  list(name = "prop_1p5pct", dir = "_results_prop1p5pct_comparison", n_comp = 20, n_cores = 8),
-  list(name = "prop_1p75pct", dir = "_results_prop1p75pct_comparison", n_comp = 20, n_cores = 8),
-  list(name = "equal_100", dir = "_results_equal100_comparison", n_comp = 20, n_cores = 8)
+# All 10 config mappings
+all_configs <- list(
+  list(name = "equal_40", dir = "_results_equal40_comparison", n_comp = 20, n_cores = 11),
+  list(name = "equal_50", dir = "_results_equal50_comparison", n_comp = 20, n_cores = 11),
+  list(name = "equal_75", dir = "_results_equal75_rerun", n_comp = 20, n_cores = 11),
+  list(name = "equal_100", dir = "_results_equal100_comparison", n_comp = 20, n_cores = 11),
+  list(name = "prop_0.5pct", dir = "_results_prop0.5pct_comparison", n_comp = 20, n_cores = 11),
+  list(name = "prop_1pct", dir = "_results_prop1pct_comparison", n_comp = 20, n_cores = 11),
+  list(name = "prop_1p25pct", dir = "_results_prop1p25pct_comparison", n_comp = 20, n_cores = 11),
+  list(name = "prop_1p5pct", dir = "_results_prop1p5pct_comparison", n_comp = 20, n_cores = 11),
+  list(name = "prop_1p75pct", dir = "_results_prop1p75pct_comparison", n_comp = 20, n_cores = 11),
+  list(name = "prop_2pct", dir = "_results_prop2pct_comparison", n_comp = 20, n_cores = 11)
 )
 
-dt_all_new <- list()
-oracle_all_new <- list()
+dt_all_list <- list()
+oracle_all_list <- list()
 
-for (cfg_info in new_configs) {
+for (cfg_info in all_configs) {
   cat(sprintf("\n=== Processing %s ===\n", cfg_info$name))
 
   if (!dir.exists(cfg_info$dir)) {
@@ -28,11 +34,11 @@ for (cfg_info in new_configs) {
   cl <- makeForkCluster(cfg_info$n_cores)
   registerDoParallel(cl)
 
-  # DT 1-fold (only eps=0.5, 0.7 available)
+  # DT 1-fold (all epsilon values now available)
   dt_configs <- expand.grid(
-    eps = c(0.5, 0.7),
+    eps = c(0.3, 0.5, 0.7),
     n_reps = c(1, 3, 5),
-    loss = "MSE",  # Only MSE for simplicity
+    loss = "MSE",
     stringsAsFactors = FALSE
   )
 
@@ -56,7 +62,7 @@ for (cfg_info in new_configs) {
 
   dt_1fold <- bind_rows(dt_list) %>% mutate(config = cfg_info$name)
 
-  # Oracle + full-data
+  # Oracle + full-data (DIC/WAIC)
   fulldata_oracle <- parLapply(cl, 1:cfg_info$n_comp, function(x, res_dir) {
     source("sim_functions/summary_oracle.R")
     summary_oracle(x, res_dir)
@@ -66,19 +72,18 @@ for (cfg_info in new_configs) {
 
   stopCluster(cl)
 
-  dt_all_new[[cfg_info$name]] <- dt_1fold
-  oracle_all_new[[cfg_info$name]] <- fulldata_oracle
+  dt_all_list[[cfg_info$name]] <- dt_1fold
+  oracle_all_list[[cfg_info$name]] <- fulldata_oracle
 
   cat(sprintf("✓ Aggregated %s\n", cfg_info$name))
 }
 
-# Load existing data
-dt_all_old <- readRDS("results_multi_config/dt_all.RDS")
-oracle_all_old <- readRDS("results_multi_config/oracle_all.RDS")
+# Combine all
+dt_all_combined <- bind_rows(dt_all_list)
+oracle_all_combined <- bind_rows(oracle_all_list)
 
-# Combine with new data
-dt_all_combined <- bind_rows(dt_all_old, bind_rows(dt_all_new))
-oracle_all_combined <- bind_rows(oracle_all_old, bind_rows(oracle_all_new))
+# Create output directory
+dir.create("results_multi_config", showWarnings = FALSE)
 
 # Save
 saveRDS(dt_all_combined, "results_multi_config/dt_all_10configs.RDS")

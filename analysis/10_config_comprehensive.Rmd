@@ -126,7 +126,7 @@ waic_selections <- oracle_all %>%
 
 # DT selections (filter to MSE loss only, select best epsilon/n_reps per config)
 dt_selections <- dt_all %>%
-  filter(method_name == "dt_1fold", loss_function == "MSE") %>%
+  filter(method_name == "dt_1fold", metric_type == "MSE") %>%
   group_by(config, comp_no, epsilon, n_reps_used) %>%
   slice_min(metric, n = 1, with_ties = FALSE) %>%
   select(config, comp_no, epsilon, n_reps_used, dt_nbasis = nbasis)
