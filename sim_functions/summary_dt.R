@@ -155,24 +155,24 @@ summary_dt <- function(comp_no, n_folds, loss_function, results_dir, n_reps_to_u
         mutate(
           comp_no = comp_no, fold_no = j, rep_no = rep,
           method = paste0("DT ", n_folds, " fold - ", loss_function),
-          metric_type = loss_function
+          loss_function = loss_function
         ) %>%
         left_join(res %>% select(fips, model = method, nbasis) %>% distinct(model, nbasis), by = "model") %>%
-        relocate(rep_no, fold_no, comp_no, method, model, metric, metric_type) %>%
+        relocate(rep_no, fold_no, comp_no, method, model, metric, loss_function) %>%
         arrange(metric)
     } # End of folds loop
 
     # Average across folds for this repetition
     result_one_rep %>%
-      group_by(comp_no, method, model, metric_type, rep_no, nbasis) %>%
+      group_by(comp_no, method, model, loss_function, rep_no, nbasis) %>%
       reframe(metric = mean(metric))
   } # End of repetitions loop
 
   #-----------------------------------------------------------------------------
   # Average across repetitions and return final result
   result_all_reps %>%
-    group_by(comp_no, method, model, metric_type, nbasis) %>%
+    group_by(comp_no, method, model, loss_function, nbasis) %>%
     reframe(metric = mean(metric)) %>%
     arrange(metric) %>%
-    relocate(metric_type, .after = last_col())
+    relocate(loss_function, .after = last_col())
 }
