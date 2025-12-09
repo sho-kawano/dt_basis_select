@@ -14,7 +14,7 @@ suppressPackageStartupMessages({
 ```{r load_result}
 # Load results
 setwd("~/dev/dt_design_based_comp")
-results <- readRDS("_results_ca_full_comparison/results.RDS") %>%
+results <- readRDS("_results_ca_full_comparison_equal75/results.RDS") %>%
   mutate(epsilon=round(epsilon, 1)) %>%
  filter((loss_function !="predictive_NLL") | is.na(loss_function)) %>%
  filter(model!="D.Est") %>%
@@ -253,7 +253,7 @@ We can see that DT underestimates the number of basis needed, especially for low
 
 Thus, we can see the inherent trade off with DT here. 
 
-```{r}
+```{r key_boxplot}
 deviations %>%
   filter(method_name =="dt_1fold" & loss_function=="MSE") %>% 
   mutate(epsilon=as.factor(epsilon)) %>% 
@@ -262,6 +262,49 @@ deviations %>%
   geom_abline(slope = 0, linetype=2, color="red") +
   facet_grid(n_reps_used~.) + 
   ggtitle("Deviations from OD-Oracle Basis across 50 Comparisons (faceted by repeats)")
+```
+
+### Comparison to TD-Oracle (Thinned-Data Oracle)
+
+The above boxplot shows DT performance relative to **OD-Oracle** (observed-data oracle fit on full data). However, the DT MSE estimator is actually unbiased for **TD-Oracle** (thinned-data oracle), which measures $\mathbb{E}[(\frac{1}{\varepsilon}\hat{\theta}^{(1)} - \theta)^2]$ where the expectation is over data thinnings.
+
+The TD-Oracle optimal may differ from OD-Oracle optimal because:
+- TD-Oracle evaluates rescaled estimators ($\frac{1}{\varepsilon}\hat{\theta}^{(1)}$) trained on less data
+- As $\varepsilon$ decreases, simpler models may be preferred to avoid overfitting on limited training data
+
+Below we show deviations from **TD-Oracle optimal** (computed via 50 independent thinnings per comparison):
+
+```{r key_boxplot_thinned}
+# Load pre-computed TD-Oracle results
+# (Run analysis/compute_td_oracle_equal75.R first if not already done)
+td_oracle_all <- readRDS("../_results_ca_full_comparison_equal75/td_oracle_all.RDS")
+
+# Find TD-Oracle optimal nbasis for each (comp_no, epsilon)
+td_oracle_optimal <- td_oracle_all %>%
+  group_by(comp_no, epsilon) %>%
+  slice_min(td_oracle_mse, n = 1, with_ties = FALSE) %>%
+  select(comp_no, epsilon, td_oracle_nbasis = nbasis)
+
+# Calculate deviations from TD-Oracle (instead of OD-Oracle)
+deviations_td <- results %>%
+  filter(method_name == "dt_1fold" & loss_function == "MSE") %>%
+  group_by(method, comp_no, epsilon, n_reps_used) %>%
+  slice_min(metric, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(comp_no, epsilon, n_reps_used, selected_nbasis = nbasis) %>%
+  left_join(td_oracle_optimal, by = c("comp_no", "epsilon")) %>%
+  mutate(deviation = selected_nbasis - td_oracle_nbasis)
+
+# Boxplot: Deviations from TD-Oracle
+deviations_td %>%
+  mutate(epsilon = as.factor(epsilon)) %>%
+  ggplot(aes(x = epsilon, y = deviation)) +
+  geom_boxplot() +
+  geom_abline(slope = 0, linetype = 2, color = "red") +
+  facet_grid(n_reps_used ~ .) +
+  ggtitle("Deviations from TD-Oracle Basis across 50 Comparisons (faceted by repeats)") +
+  ylab("Deviation (selected - TD-Oracle optimal)") +
+  theme_bw()
 ```
 
 
@@ -277,5 +320,3 @@ deviations %>%
 ```
 
 We can see that outside of empirical simulations (ESIM), all of the other methods including the 5 fold data thinning, seem to be unbiased WRT to the oracle basis.
-
-

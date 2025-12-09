@@ -1,0 +1,265 @@
+---
+title: "Epsilon Sensitivity Analysis for Spatial Basis Fixed Effects Model"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 6)
+library(tidyverse)
+library(knitr)
+```
+
+
+```{r load_data}
+# Load aggregated 8-config data
+dt_all <- readRDS("../results_multi_config/dt_epsilon_8configs.RDS")
+oracle_all <- readRDS("../results_multi_config/oracle_epsilon_8configs.RDS")
+
+# FOCUS: n_reps = 5 only (most stable with maximum averaging)
+dt_all <- dt_all %>% filter(n_reps_used == 5)
+
+# Order config by sample size
+config_levels <- c(
+  "equal_20", "equal_30", "equal_40", "equal_50", "equal_75",
+  "equal_100", "equal_125", "equal_150"
+)
+dt_all <- dt_all %>% mutate(config = factor(config, levels = config_levels))
+oracle_all <- oracle_all %>% mutate(config = factor(config, levels = config_levels))
+
+# Get oracle selections per config/comparison
+oracle_selections <- oracle_all %>%
+  filter(!is.na(mse_true)) %>%
+  group_by(config, comp_no) %>%
+  slice_min(mse_true, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(config, comp_no, oracle_nbasis = nbasis, oracle_mse = mse_true)
+
+# cat(sprintf("Loaded %d configs (n_reps=5 only)\n", length(unique(dt_all$config))))
+# cat(sprintf("Total observations: %d\n", nrow(dt_all)))
+# cat(sprintf(
+#   "Sample sizes: %s\n",
+#   paste(sort(unique(as.numeric(str_extract(dt_all$config, "[0-9]+")))), collapse = ", ")
+# ))
+# cat(sprintf(
+#   "Epsilon grid: %s\n",
+#   paste(sort(unique(dt_all$epsilon)), collapse = ", ")
+# ))
+```
+
+```{r compute_mad}
+# Get DT selections (minimum metric value)
+dt_selections <- dt_all %>%
+  group_by(config, comp_no, epsilon, loss_function) %>%
+  slice_min(metric, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(config, comp_no, epsilon, loss_function, selected_nbasis = nbasis)
+
+# Join with oracle selections
+dt_deviations <- dt_selections %>%
+  left_join(oracle_selections, by = c("config", "comp_no")) %>%
+  mutate(
+    deviation = selected_nbasis - oracle_nbasis,
+    abs_deviation = abs(deviation),
+    sample_size = as.numeric(str_extract(config, "[0-9]+"))
+  )
+
+# Compute MAD per config × epsilon × loss
+mad_summary <- dt_deviations %>%
+  group_by(config, sample_size, epsilon, loss_function) %>%
+  summarise(
+    MAD = mean(abs_deviation),
+    mean_dev = mean(deviation),
+    sd_dev = sd(deviation),
+    .groups = "drop"
+  )
+
+# Find optimal epsilon per config × loss
+optimal_eps <- mad_summary %>%
+  group_by(config, sample_size, loss_function) %>%
+  slice_min(MAD, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(config, sample_size, loss_function, optimal_eps = epsilon, optimal_MAD = MAD)
+
+#cat(sprintf("Computed MAD for %d epsilon × config × loss combinations\n", nrow(mad_summary)))
+```
+
+# Overview 
+
+This analysis investigates how **optimal epsilon for data thinning** varies with equal allocation sample sizes (n=20 to n=150) using a Fay-Herriot model that uses fixed-effect spatial basis functions. 
+
+I tried **equal allocation** sampling by PUMA. I varied this from n=20 to 150. 
+All results shown for **n_reps=5** (maximum averaging, most stable).
+
+### Oracle Signal Doesn't Always Improve with sample size 
+
+We can see the observed data oracle MSE curves below.  We can see that the oracle signal doesn't actually improve with sample size. It gets 'noisier' after a certain sweet spot around 40-75. 
+
+
+```{r oracle_curves, fig.height=8}
+oracle_all %>%
+  filter(!is.na(mse_true)) %>%
+  ggplot(aes(x = nbasis, y = mse_true)) +
+  geom_line(aes(group = comp_no), alpha = 0.3, color = "darkgreen") +
+  geom_point(
+    data = oracle_selections,
+    aes(x = oracle_nbasis, y = oracle_mse),
+    color = "red", size = 1
+  ) +
+  facet_wrap(~config, ncol = 3, scales = "free_y") +
+  labs(
+    title = "Oracle MSE Curves by Config",
+    subtitle = "Red points = optimal nbasis for each comparison",
+    x = "nbasis",
+    y = "MSE"
+  ) +
+  theme_minimal()
+```
+
+
+The Optimal Epsilon actually follows this general trajectory of the oracle signal:
+
+```{r epsilon_trajectory, fig.width=10, fig.height=5}
+optimal_eps %>% 
+ggplot(aes(x = sample_size, y = optimal_eps, color = loss_function, group = loss_function)) +
+  geom_line(alpha=0.8) +
+  geom_point(alpha=0.7) +
+  scale_color_brewer(palette = "Set1", name = "Loss Function") +
+  scale_y_continuous(breaks = seq(0.1, 0.9, 0.1), limits = c(0, 1)) +
+  labs(
+    title = "Optimal Epsilon vs Sample Size",
+    x = "Sample Size (n per PUMA)",
+    y = "Optimal Epsilon"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 12),
+    legend.position = "bottom"
+  )
+```
+
+Optimal epsilon follows a non-monotonic pattern driven by oracle signal quality:
+
+- **n=20:** eps ≈ 0.1 (too little data, unreliable, probably not enough for CLT)
+- **n=30-40:** eps ≈ 0.7-0.9 (peak - best oracle signal)
+- **n=50-100:** eps ≈ 0.6-0.7 (plateau - stable range)
+- **n=125-150:** eps ≈ 0.4-0.5 (decline - flatter oracle curves)
+
+**The Story:** As sample size increases, direct estimates improve but oracle curves flatten. This requires adjusting epsilon: larger samples paradoxically need MORE validation data (lower epsilon) to detect differences between models.
+
+
+
+### Epsilon vs MAD of Basis Selected (compared to Oracle)
+
+```{r mad_curves, fig.width=8, fig.height=6}
+# Annotate optimal epsilon
+mad_with_optimal <- mad_summary %>%
+  left_join(optimal_eps %>% select(sample_size, loss_function, optimal_eps),
+    by = c("sample_size", "loss_function")
+  ) %>% 
+  filter(loss_function=="MSE")
+
+mad_with_optimal %>% 
+  ggplot(aes(x = epsilon, y = MAD, group=factor(sample_size))) +
+  geom_line(size=1, color='blue') +
+  geom_point(size=1, color='blue') +
+  geom_point(
+    data = mad_with_optimal %>% filter(abs(epsilon - optimal_eps) < 0.01),
+    size = 3, shape = 21, stroke = 2, 
+  ) +
+  facet_wrap(~factor(sample_size), scales='free_y') +
+  labs(
+    x = "Epsilon",
+    y = "MAD (Mean Absolute Deviation from Oracle)"
+  ) +
+  #theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    strip.text = element_text(face = "bold", size = 14),
+    legend.position = "right"
+  )
+```
+
+**Key observations:**
+
+- **Small samples (n=20):** Very steep curves on left (big overfitting penalty)
+- **Mid-range (n=30-50):** Big underfitting penalty
+- **Large samples (n=100-125):** More U-Shaped 
+
+
+
+# Best Average Performance
+
+Which epsilon performs best **on average** across all sample sizes?
+
+```{r average_performance}
+# Average MAD across all sample sizes for each epsilon
+avg_mad_by_epsilon <- dt_deviations %>%
+  group_by(epsilon) %>%
+  summarise(
+    avg_MAD = mean(abs_deviation),
+    sd_MAD = sd(abs_deviation),
+    median_MAD = median(abs_deviation),
+    n_configs = n_distinct(config),
+    .groups = "drop"
+  ) %>%
+  arrange(avg_MAD)
+
+
+kable(avg_mad_by_epsilon,
+  digits = 2,
+  col.names = c("Epsilon", "Avg MAD", "SD", "Median MAD", "N Configs")
+)
+
+best_eps <- avg_mad_by_epsilon$epsilon[1]
+best_mad <- avg_mad_by_epsilon$avg_MAD[1]
+second_eps <- avg_mad_by_epsilon$epsilon[2]
+second_mad <- avg_mad_by_epsilon$avg_MAD[2]
+safe_range <- avg_mad_by_epsilon %>%
+  filter(avg_MAD <= best_mad + 0.2)
+```
+
+**Interpretation:**
+
+- **epsilon = `r best_eps`** has the best average performance across all sample sizes
+- **epsilon = 0.4-0.7** all perform relatively similiarly 
+- Avoid extremes: eps ≤ 0.2 or eps ≥ 0.9 perform substantially worse
+
+
+
+### Epsilon Range by Sample Size
+
+```{r epsilon_range}
+epsilon_range <- mad_summary %>%
+  group_by(sample_size) %>%
+  summarise(
+    min_MAD = min(MAD),
+    max_MAD = max(MAD),
+    range_MAD = max_MAD - min_MAD,
+    best_eps = epsilon[which.min(MAD)],
+    worst_eps = epsilon[which.max(MAD)],
+    .groups = "drop"
+  )
+kable(epsilon_range,
+  digits = 2,
+  col.names = c("Sample Size", "Min MAD", "Max MAD", "Range", "Best ε", "Worst ε")
+)
+```
+
+Range of MAD shows how much epsilon choice matters. Larger ranges = more sensitive to epsilon selection.
+
+### Concluding Thoughts
+
+
+Just like the discussion in this paper [this paper](https://arxiv.org/abs/2511.12698), I think that the optimal epsilon depends on 
+
+1. model complexity 
+
+2. the signal in the data itself. 
+
+In this analysis, we're only able to vary 2. We need to look at 1 as well. 
