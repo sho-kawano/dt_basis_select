@@ -69,7 +69,7 @@ model_config <- list(
   n_cores = 11,
 
   # Output
-  results_dir = "_results_ca_full_comparison",
+  results_dir = "_results_ca_full_comparison_prop1p5",
 
   # Study design
   n_comp = 50 # PRODUCTION: 50 comparisons

@@ -92,12 +92,12 @@ After discovering flat curves with PUBCOV, conducted systematic testing of alter
 
 **Sample Size Comparison (CA Employed, 20 comparisons each):**
 
-| equal_n | Mean Opt | SD | Range | MSE Var | Penalty ±6 | Assessment |
-|---------|----------|-----|--------|---------|------------|------------|
-| 40 | 13.1 | 3.7 | [3,15] | 47.1% | 5.4% | ⚠️ Range touches boundary |
-| 50 | 14.2 | 2.7 | [6,18] | 44.1% | 6.8% | ⚠️ Too close to boundary (6-3=3) |
-| **75** | **16.4** | **2.7** | **[12,24]** | **31.5%** | **8.0%** | ✅ **SELECTED** |
-| 100 | 18.9 | 8.3 | [15,51] | 24.7% | 8.7% | ❌ SD too high |
+| equal_n | Mean Opt | SD      | Range       | MSE Var   | Penalty ±6 | Assessment                      |
+| ------- | -------- | ------- | ----------- | --------- | ---------- | ------------------------------- |
+| 40      | 13.1     | 3.7     | [3,15]      | 47.1%     | 5.4%       | ⚠️ Range touches boundary        |
+| 50      | 14.2     | 2.7     | [6,18]      | 44.1%     | 6.8%       | ⚠️ Too close to boundary (6-3=3) |
+| **75**  | **16.4** | **2.7** | **[12,24]** | **31.5%** | **8.0%**   | ✅ **SELECTED**                  |
+| 100     | 18.9     | 8.3     | [15,51]     | 24.7%     | 8.7%       | ❌ SD too high                   |
 
 **Why equal_75 Selected:**
 1. **Low SD (2.7)** - Consistent optimal across comparisons
@@ -124,63 +124,6 @@ Expected optimal: nbasis~15-16
 **Test Script:**
 - `test_ca_oracle_minimal.R` - Minimal oracle-only test (no excessive printing, easy to review)
 - Validates oracle properties before running full pipeline
-
-**Oracle Results Directories:**
-- `_results_ca_employed_equal40_oracle/` - 20 comparisons (rejected: boundary issues)
-- `_results_ca_employed_equal50_oracle/` - 20 comparisons (rejected: too close to boundary)
-- `_results_ca_employed_equal75_oracle/` - 20 comparisons (**SELECTED**)
-- `_results_ca_employed_equal100_oracle/` - 20 comparisons (rejected: high SD)
-
-**Next Steps:**
-1. Run full pilot (10-20 comparisons) with equal_75 + all methods (DT 1-fold, DT 5-fold, WAIC, DIC, ESIM)
-2. Validate methods can identify optimal nbasis~15-16
-3. If successful → scale to production (50-70 comparisons)
-
----
-
-### ⚠️ CRITICAL ISSUE DISCOVERED: Equal Allocation May Favor DIC/WAIC (Nov 2025)
-
-**Problem Identified in 50-Comparison Study (`analysis/equal_75_results.html`):**
-
-After running 50 comparisons with equal_75 configuration, discovered that **DIC/WAIC vastly outperformed all DT methods**:
-
-| Method | Mean Dev | MAD | Ranking |
-|--------|----------|-----|---------|
-| DIC | -0.2 | 4.0 | 🥇 Best |
-| WAIC | +0.4 | 4.9 | 🥈 2nd |
-| DT 5-fold MSE | -1.6 | 5.2 | 4th |
-| DT 1-fold MSE | -3.7 | 5.6 | 7th |
-| ESIM standard | -6.3 | 7.3 | Worst |
-
-**Root Cause Hypothesis:**
-Equal allocation (n=75 per PUMA) creates **too consistent oracle signal** (MSE variation = 31.5%):
-- Direct estimates don't vary much across comparisons
-- **No penalty for overfitting** to a specific sample
-- DIC/WAIC can overfit without consequence → artificially dominate
-- DT systematically underestimates (negative mean_dev) because it trains on less data
-- This design may not provide a fair test of DT vs. likelihood-based methods
-
-**Multi-Config Investigation (Nov 2025):**
-
-Ran 6 sampling designs (20 comparisons each) to find one with **higher MSE variation** that properly penalizes overfitting:
-
-| Config | MSE Var | SD | Boundary % | Assessment |
-|--------|---------|-----|------------|------------|
-| equal_75 | 31.5% | 2.7 | 0% | ⚠️ Too consistent |
-| equal_40 | **47.1%** ↑ | 3.7 | 5% | More variability, slight boundary |
-| equal_50 | **44.1%** ↑ | 2.7 | 0% | Good variability, no boundary |
-| prop_1pct | 37.3% | 4.6 | 5% | Moderate increase |
-
-**Implication:**
-- **equal_50** might provide fairer comparison (44% MSE var, low SD, no boundary)
-- Need to re-run full method comparison on equal_40 or equal_50 to see if DT performs better
-- Goal: Find design with enough variability to differentiate methods fairly while maintaining good oracle properties
-
-**Key Research Question:**
-Compare how DIC/WAIC/DT methods perform across different sampling designs (equal_40, equal_50, equal_75, prop_0.5pct, prop_1pct, prop_2pct) to understand which design creates fair conditions for method comparison.
-
-**See:** `analysis/equal_75_results.Rmd` lines 200-211 for detailed discussion
-
 ---
 
 ### ✅ Six-Dimensional Analysis Framework (Nov 29, 2025)
@@ -200,24 +143,24 @@ Developed unified framework to compare methods across sampling designs using 6 k
 
 **Complete Results (6 configs, 20 comparisons each):**
 
-| Config | CV | MSE_var | d_ratio | Oracle_SD | Mean_nbasis | Difficulty | DIC | WAIC | DT ε=0.5 n=1 | DT ε=0.5 n=5 | DT ε=0.7 n=5 |
-|--------|-----|---------|---------|-----------|-------------|------------|-----|------|--------------|--------------|--------------|
-| equal_50 | 0.18 | 311 | 5.4 | 2.7 | 14.3 | **0.88** | 6.9 | 6.45 | 7.95 | 7.65 | **6.15** ⭐ |
-| equal_75 | 0.15 | 255 | 5.0 | 2.7 | 16.4 | **1.04** | **5.1** ⭐ | 6.60 | 10.05 | 7.80 | 7.05 |
-| equal_40 | 0.21 | 307 | 6.8 | 3.7 | 13.1 | **1.20** | 5.7 | **5.55** ⭐ | 8.10 | 8.10 | 6.90 |
-| prop_0.5pct | 0.24 | 280 | 13.4 | 4.2 | 11.3 | **1.51** | **7.5** ⭐ | 7.95 | **6.45** ⭐ | 8.40 | 8.25 |
-| prop_1pct | 0.17 | 293 | 6.5 | 4.6 | 14.7 | **1.56** | **5.4** ⭐ | 7.05 | 7.95 | 6.90 | 7.20 |
-| prop_2pct | 0.12 | 194 | 5.5 | 8.8 | 20.4 | **4.54** | 9.3 | 11.4 | 10.20 | **7.65** ⭐ | 8.40 |
+| Config      | CV   | MSE_var | d_ratio | Oracle_SD | Mean_nbasis | Difficulty | DIC       | WAIC       | DT ε=0.5 n=1 | DT ε=0.5 n=5 | DT ε=0.7 n=5 |
+| ----------- | ---- | ------- | ------- | --------- | ----------- | ---------- | --------- | ---------- | ------------ | ------------ | ------------ |
+| equal_50    | 0.18 | 311     | 5.4     | 2.7       | 14.3        | **0.88**   | 6.9       | 6.45       | 7.95         | 7.65         | **6.15** ⭐   |
+| equal_75    | 0.15 | 255     | 5.0     | 2.7       | 16.4        | **1.04**   | **5.1** ⭐ | 6.60       | 10.05        | 7.80         | 7.05         |
+| equal_40    | 0.21 | 307     | 6.8     | 3.7       | 13.1        | **1.20**   | 5.7       | **5.55** ⭐ | 8.10         | 8.10         | 6.90         |
+| prop_0.5pct | 0.24 | 280     | 13.4    | 4.2       | 11.3        | **1.51**   | **7.5** ⭐ | 7.95       | **6.45** ⭐   | 8.40         | 8.25         |
+| prop_1pct   | 0.17 | 293     | 6.5     | 4.6       | 14.7        | **1.56**   | **5.4** ⭐ | 7.05       | 7.95         | 6.90         | 7.20         |
+| prop_2pct   | 0.12 | 194     | 5.5     | 8.8       | 20.4        | **4.54**   | 9.3       | 11.4       | 10.20        | **7.65** ⭐   | 8.40         |
 
 **Summary Statistics (Mean MAD across configs):**
 
-| Method | Mean MAD | Range | Assessment |
-|--------|----------|-------|------------|
-| **DIC** | **6.65** | 4.20 | Best mean performance |
-| **DT ε=0.7 n=5** | 7.32 | 2.25 | **Best balance** (competitive mean, very stable) |
-| WAIC | 7.50 | 5.85 | Middle performance, least stable |
-| **DT ε=0.5 n=5** | 7.75 | **1.50** | **Most stable!** |
-| DT ε=0.5 n=1 | 8.45 | 3.75 | Less stable without averaging |
+| Method           | Mean MAD | Range    | Assessment                                       |
+| ---------------- | -------- | -------- | ------------------------------------------------ |
+| **DIC**          | **6.65** | 4.20     | Best mean performance                            |
+| **DT ε=0.7 n=5** | 7.32     | 2.25     | **Best balance** (competitive mean, very stable) |
+| WAIC             | 7.50     | 5.85     | Middle performance, least stable                 |
+| **DT ε=0.5 n=5** | 7.75     | **1.50** | **Most stable!**                                 |
+| DT ε=0.5 n=1     | 8.45     | 3.75     | Less stable without averaging                    |
 
 **Key Findings:**
 
@@ -267,18 +210,18 @@ After the 6-config exploratory analysis, expanded to **10 sampling designs** (4 
 
 **The 10 Configurations:**
 
-| Config | Type | Parameter | Mean n/PUMA | Comparisons |
-|--------|------|-----------|-------------|-------------|
-| **equal_40** | Equal | n=40 | 40 | 20 |
-| **equal_50** | Equal | n=50 | 50 | 20 |
-| **equal_75** | Equal | n=75 | 75 | 20 |
-| **equal_100** | Equal | n=100 | 100 | 20 |
-| **prop_0.5pct** | PPS | 0.5% | ~85 | 20 |
-| **prop_1pct** | PPS | 1.0% | ~170 | 20 |
-| **prop_1p25pct** | PPS | 1.25% | ~212 | 20 |
-| **prop_1p5pct** | PPS | 1.5% | ~255 | 20 |
-| **prop_1p75pct** | PPS | 1.75% | ~297 | 20 |
-| **prop_2pct** | PPS | 2.0% | ~340 | 20 |
+| Config           | Type  | Parameter | Mean n/PUMA | Comparisons |
+| ---------------- | ----- | --------- | ----------- | ----------- |
+| **equal_40**     | Equal | n=40      | 40          | 20          |
+| **equal_50**     | Equal | n=50      | 50          | 20          |
+| **equal_75**     | Equal | n=75      | 75          | 20          |
+| **equal_100**    | Equal | n=100     | 100         | 20          |
+| **prop_0.5pct**  | PPS   | 0.5%      | ~85         | 20          |
+| **prop_1pct**    | PPS   | 1.0%      | ~170        | 20          |
+| **prop_1p25pct** | PPS   | 1.25%     | ~212        | 20          |
+| **prop_1p5pct**  | PPS   | 1.5%      | ~255        | 20          |
+| **prop_1p75pct** | PPS   | 1.75%     | ~297        | 20          |
+| **prop_2pct**    | PPS   | 2.0%      | ~340        | 20          |
 
 **Key Results:**
 
@@ -295,18 +238,18 @@ After the 6-config exploratory analysis, expanded to **10 sampling designs** (4 
 
 **Winner by Config:**
 
-| Config | Winner | MAD | DT Gap |
-|--------|--------|-----|--------|
-| prop_1p75pct | DT ε=0.5 n=5 | 5.25 | **-4.65** ⭐⭐⭐ |
-| equal_100 | DT ε=0.7 n=3 | 6.75 | **-3.90** ⭐⭐⭐ |
-| prop_2pct | DT ε=0.5 n=5 | 7.65 | -1.65 |
-| prop_1p5pct | DT ε=0.5 n=3 | 5.25 | -1.05 |
-| prop_0.5pct | DT ε=0.5 n=1 | 6.45 | -1.05 |
-| equal_50 | DT ε=0.7 n=5 | 6.15 | -0.75 |
-| prop_1p25pct | DT ε=0.7 n=5 | **4.35** | -0.60 |
-| equal_40 | WAIC | 5.55 | +1.20 |
-| equal_75 | DIC | 5.10 | +1.20 |
-| prop_1pct | DIC | 5.40 | +1.50 |
+| Config       | Winner       | MAD      | DT Gap        |
+| ------------ | ------------ | -------- | ------------- |
+| prop_1p75pct | DT ε=0.5 n=5 | 5.25     | **-4.65** ⭐⭐⭐ |
+| equal_100    | DT ε=0.7 n=3 | 6.75     | **-3.90** ⭐⭐⭐ |
+| prop_2pct    | DT ε=0.5 n=5 | 7.65     | -1.65         |
+| prop_1p5pct  | DT ε=0.5 n=3 | 5.25     | -1.05         |
+| prop_0.5pct  | DT ε=0.5 n=1 | 6.45     | -1.05         |
+| equal_50     | DT ε=0.7 n=5 | 6.15     | -0.75         |
+| prop_1p25pct | DT ε=0.7 n=5 | **4.35** | -0.60         |
+| equal_40     | WAIC         | 5.55     | +1.20         |
+| equal_75     | DIC          | 5.10     | +1.20         |
+| prop_1pct    | DIC          | 5.40     | +1.50         |
 
 **Final Conclusion:**
 DT provides substantial value in most sampling regimes, especially proportional allocation and high sample sizes. While not universally dominant, DT wins significantly more often (70%) and with larger magnitude (up to 4.65 vs max 1.50 for DIC). The "sweet spot" is **prop_1p25pct** where DT achieves the best performance across all configs.
@@ -392,14 +335,14 @@ See `_for_claude/architecture_change_analysis.md` for complete details.
 
 **Method Performance Results (10 comparisons):**
 
-| Method | Mean nbasis | SD | Boundary % | Exact Match | Within ±3 | Ranking |
-|--------|-------------|-----|------------|-------------|-----------|---------|
-| **Oracle MSE** | 16.5 | 2.9 | 0% | - | - | Truth |
-| **DIC** | 15.3 | 6.4 | 10% | **30%** | **60%** | 🥇 **Best** |
-| **WAIC** | 15.3 | 6.2 | 10% | **20%** | **60%** | 🥈 2nd |
-| DT eps=0.5, 3 reps | 12.9 | 5.3 | 10% | 20% | **70%** | 🥉 3rd |
-| DT 5-fold | 14.4 | 8.1 | 10% | 10% | 30% | 5th |
-| ESIM (50 iters) | 8.4 | 5.3 | **30%** | 30% | 40% | 4th |
+| Method             | Mean nbasis | SD  | Boundary % | Exact Match | Within ±3 | Ranking    |
+| ------------------ | ----------- | --- | ---------- | ----------- | --------- | ---------- |
+| **Oracle MSE**     | 16.5        | 2.9 | 0%         | -           | -         | Truth      |
+| **DIC**            | 15.3        | 6.4 | 10%        | **30%**     | **60%**   | 🥇 **Best** |
+| **WAIC**           | 15.3        | 6.2 | 10%        | **20%**     | **60%**   | 🥈 2nd      |
+| DT eps=0.5, 3 reps | 12.9        | 5.3 | 10%        | 20%         | **70%**   | 🥉 3rd      |
+| DT 5-fold          | 14.4        | 8.1 | 10%        | 10%         | 30%       | 5th        |
+| ESIM (50 iters)    | 8.4         | 5.3 | **30%**    | 30%         | 40%       | 4th        |
 
 **Key Findings:**
 
