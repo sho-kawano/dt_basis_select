@@ -7,6 +7,12 @@ I am working on this repo by myself. I would prioritize brevity / clarity and le
 
 Please be extra careful for making changes that involve nuanced statistical reasoning, evaluating results, etc. If you're unsure, just ask me (I don't mind). Ex: if you're unsure about what goes where in a model call please take a conservative approach.
 
+**When drawing conclusions from data analysis:**
+- Be skeptical and understated in claims
+- Avoid overstatement or exaggeration of results
+- Verify quantitative claims carefully before stating them
+- Prefer conservative interpretations over bold claims
+
 For tasks that are mostly software-enginnering based, I fully trust your judgement.
 
 **For data analysis tasks:** See `_for_claude/efficient_data_analysis.md` for workflow best practices.
