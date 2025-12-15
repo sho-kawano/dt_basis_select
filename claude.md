@@ -7,6 +7,12 @@ I am working on this repo by myself. I would prioritize brevity / clarity and le
 
 Please be extra careful for making changes that involve nuanced statistical reasoning, evaluating results, etc. If you're unsure, just ask me (I don't mind). Ex: if you're unsure about what goes where in a model call please take a conservative approach.
 
+**When drawing conclusions from data analysis:**
+- Be skeptical and understated in claims
+- Avoid overstatement or exaggeration of results
+- Verify quantitative claims carefully before stating them
+- Prefer conservative interpretations over bold claims
+
 For tasks that are mostly software-enginnering based, I fully trust your judgement.
 
 **For data analysis tasks:** See `_for_claude/efficient_data_analysis.md` for workflow best practices.
@@ -373,10 +379,15 @@ See `_for_claude/architecture_change_analysis.md` for complete details.
 Rscript run_summary.R <results_dir>    # Analyzes results
 ```
 
+**Current Work (Dec 2025):**
+- ✅ **equal_75 full results:** 50 comparisons complete (`_results_ca_full_comparison_equal75/`)
+- 🔄 **prop1p5pct full results:** 50 comparisons running (to have second complete dataset)
+- Expected runtime: ~25-50 hours
+
 **Next Steps:**
-- Investigate DT systematic underestimation bias
-- Scale to production (50-70 comparisons) if ready
-- Consider testing more DT configurations or loss functions
+- Analyze prop1p5pct full results (50 comparisons)
+- Compare equal_75 vs prop1p5pct patterns across full datasets
+- Consider TD-Oracle unbiasedness test (see Future Work section)
 
 ---
 
@@ -458,3 +469,23 @@ deviations <- results %>%
   left_join(oracle_selections, by = "comp_no") %>%
   mutate(deviation = selected_nbasis - oracle_nbasis)
 ```
+
+---
+
+## Future Work / Analysis Ideas
+
+### TD-Oracle Unbiasedness Test
+
+Create a standalone analysis to test DT unbiasedness more directly:
+
+**Approach:**
+- Use **single comparison** (e.g., comp_no=1)
+- Compute **TD-Oracle ground truth** with many thinnings (500-1000) for each (epsilon, nbasis)
+- Simulate **DT estimator distribution** with realistic n_reps (e.g., 3 reps, 100 replicates)
+- **Plot comparison**: Overlay TD-Oracle curve, DT mean curve, and DT uncertainty bands
+
+**Benefits:**
+- ✅ Much faster than multi-comparison approach
+- ✅ More direct test of unbiasedness (visual curve comparison)
+- ✅ Clearer message: "DT estimator tracks TD-Oracle ground truth"
+- ✅ Standalone script, doesn't need full pipeline
