@@ -39,19 +39,90 @@ Results directories contain valuable computational results that take hours to ge
 
 This rule applies to ALL scripts, including test scripts and re-runs.
 
-### What needs to be done
+---
 
-Most of the code will be adapted from `dev/dt_choose_covs`. This repo differs in **two fundamental ways**:
+## Project Analyses
 
-1. **Data Generation:** Uses design-based sampling from California PUMS data
-   - Each comparison = independent sample from `data/ca_pums_population.rds`
-   - Predictors (X): Computed from full population (fixed across comparisons, configurable)
-   - Response (z, d): Survey-weighted direct estimates from sample (vary across comparisons)
-   - No pre-aggregated data - sampling happens on-the-fly
+This repository contains multiple related analyses studying data thinning for model selection in small area estimation. All analyses use:
+- **Data:** California PUMS population (`data/ca_pums_population.rds`)
+- **Model:** Spatial basis function model with fixed basis (`spatial_basis_fit.R`)
+- **Response:** Employment-to-population ratio (`employed`)
+- **Evaluation:** Compare model selection methods against true population parameters
 
-2. **Models:** Will use spatial basis function model instead of Fay-Herriot
-   - New model code needs to be implemented: `spatial_basis_fit.R`
-   - For now: Comment out all model fitting calls until model is ready
+### Analysis 1: 10-Config Comprehensive Comparison (PRIMARY)
+
+**Purpose:** Compare DT vs DIC/WAIC across diverse sampling designs
+
+**Scripts:**
+- `test_sampling_designs_10configs.R` - Generates all 10 sampling designs
+- `aggregate_all_10configs.R` - Aggregates results across configs
+- `analysis/10_config_comprehensive.Rmd` - Analysis report
+
+**Configuration:**
+- 10 sampling designs (4 equal allocation: n=40,50,75,100; 6 proportional PPS: 0.5%-2.0%)
+- 20 comparisons per config
+- DT: ε ∈ {0.3, 0.4, 0.5, 0.6, 0.7, 0.8}, n_reps ∈ {1, 5}, MSE loss only
+- Benchmarks: DIC, WAIC, OD-Oracle
+- Note: No k-fold DT in this analysis
+
+**Output:**
+- `results_multi_config/dt_all_10configs.RDS`
+- `results_multi_config/oracle_all_10configs.RDS`
+
+**Key Finding:** DT wins 70% of configs, especially in proportional allocation
+
+---
+
+### Analysis 2: Full Comparisons (COMPUTATIONALLY INTENSIVE)
+
+**Purpose:** Deep comparison including ESIM with 50 comparisons
+
+**Configurations completed:**
+- `_results_ca_full_comparison_equal75/` - Equal allocation, n=75 (50 comparisons)
+- `_results_prop1p5pct_full_comparison/` - Proportional 1.5% (50 comparisons)
+
+**Methods:** DT (multiple ε), DIC, WAIC, ESIM (100 iterations)
+
+**Scripts:**
+- `run_prop1p5pct_full.R` (example production script)
+- `run_summary.R` (aggregation)
+
+⚠️ **NEVER DELETE THESE DIRECTORIES** - they take 25-50+ hours to generate
+
+---
+
+### Analysis 3: Epsilon Sensitivity Analysis
+
+**Purpose:** Study optimal epsilon across sample sizes (equal allocation only)
+
+**Scripts:**
+- `aggregate_epsilon_8configs.R` - Aggregates 8 equal allocation configs
+- `analysis/epsilon_sensitivity.Rmd` - Analysis report
+
+**Configuration:**
+- 8 equal allocation configs (n=20,30,40,50,75,100,125,150)
+- DT: ε ∈ {0.1-0.9} (full grid), n_reps ∈ {1,3,5}
+- Loss functions: MSE + plugin_NLL
+
+**Output:**
+- `results_multi_config/dt_epsilon_8configs.RDS`
+- `results_multi_config/oracle_epsilon_8configs.RDS`
+
+**Shared directories:** Some directories used by both Analysis 1 and 3:
+- `_results_equal40_comparison/`
+- `_results_equal50_comparison/`
+- `_results_equal75_rerun/`
+- `_results_equal100_comparison/`
+
+---
+
+### Analysis 4: Oracle Consistency Screening (EXPLORATORY)
+
+**Purpose:** Test different response variables for oracle properties
+
+**Location:** `oracle_consistency_analysis/`
+
+**Status:** Exploratory - identified `employed` as best response variable
 
 ---
 
@@ -234,7 +305,7 @@ After the 6-config exploratory analysis, expanded to **10 sampling designs** (4 
 **DT vs DIC Performance:**
 - **DT Wins:** 7/10 configs (70%)
 - **DIC Wins:** 3/10 configs (30%)
-- **Largest DT advantage:** prop_1p75pct (wins by **4.65 MAD**)
+- **Largest DT advantage:** prop_1p75pct & equal_100 (both win by **4.65 MAD**)
 - **Best overall performance:** prop_1p25pct (DT ε=0.7 n=5: **MAD=4.35**)
 
 **Pattern Summary:**
@@ -247,27 +318,26 @@ After the 6-config exploratory analysis, expanded to **10 sampling designs** (4 
 | Config       | Winner       | MAD      | DT Gap        |
 | ------------ | ------------ | -------- | ------------- |
 | prop_1p75pct | DT ε=0.5 n=5 | 5.25     | **-4.65** ⭐⭐⭐ |
-| equal_100    | DT ε=0.7 n=3 | 6.75     | **-3.90** ⭐⭐⭐ |
-| prop_2pct    | DT ε=0.5 n=5 | 7.65     | -1.65         |
-| prop_1p5pct  | DT ε=0.5 n=3 | 5.25     | -1.05         |
+| equal_100    | DT ε=0.6 n=5 | 6.00     | **-4.65** ⭐⭐⭐ |
+| prop_2pct    | DT ε=0.6 n=5 | 7.35     | -1.95         |
 | prop_0.5pct  | DT ε=0.5 n=1 | 6.45     | -1.05         |
 | equal_50     | DT ε=0.7 n=5 | 6.15     | -0.75         |
+| prop_1p5pct  | DT ε=0.5 n=5 | 5.55     | -0.75         |
 | prop_1p25pct | DT ε=0.7 n=5 | **4.35** | -0.60         |
-| equal_40     | WAIC         | 5.55     | +1.20         |
-| equal_75     | DIC          | 5.10     | +1.20         |
+| equal_40     | WAIC         | 5.55     | +0.90         |
+| equal_75     | DIC          | 5.10     | +1.35         |
 | prop_1pct    | DIC          | 5.40     | +1.50         |
 
 **Final Conclusion:**
 DT provides substantial value in most sampling regimes, especially proportional allocation and high sample sizes. While not universally dominant, DT wins significantly more often (70%) and with larger magnitude (up to 4.65 vs max 1.50 for DIC). The "sweet spot" is **prop_1p25pct** where DT achieves the best performance across all configs.
 
-**Files Generated:**
+**Files:**
 - `test_sampling_designs_10configs.R` - Main execution script (runs all 10 configs)
-- `aggregate_additional_configs.R` - Aggregates 4 new configs into unified dataset
-- `analyze_all_dt_configs.R` - Comprehensive analysis (top 3, DT vs DIC gap)
+- `aggregate_all_10configs.R` - Aggregates all 10 configs (ε ∈ {0.3-0.8}, n_reps ∈ {1, 5})
+- `visualize_epsilon_curves.R` - Creates epsilon sensitivity plots
+- `analysis/10_config_comprehensive.Rmd` - Analysis report with epsilon visualizations
 - `results_multi_config/dt_all_10configs.RDS` - All DT results
 - `results_multi_config/oracle_all_10configs.RDS` - All oracle/DIC/WAIC results
-- **`COMPREHENSIVE_SUMMARY_10_CONFIGS.md`** - Full results documentation
-- **`REPRODUCTION_GUIDE.md`** - Complete reproduction instructions
 
 **Results Directories:**
 ```
@@ -284,6 +354,31 @@ _results_prop2pct_comparison/
 ```
 
 **Note:** ESIM results not available for any configs (skipped during aggregation).
+
+**Additional Analysis:**
+
+**Epsilon Sensitivity Across Configs:**
+
+Optimal epsilon varies by config (n=5):
+- **ε=0.6:** equal_100, equal_50, equal_75, prop_2pct (4 configs)
+- **ε=0.7:** equal_40, prop_1p25pct, prop_1p5pct, prop_1pct (4 configs)
+- **ε=0.5:** prop_1p75pct (1 config)
+- **ε=0.3:** prop_0.5pct (1 config - only low-ε winner)
+
+Overall performance (mean across 10 configs):
+1. DT ε=0.7 n=5: 6.21% MSE penalty (best)
+2. DIC: 6.37%
+3. DT ε=0.6 n=5: 6.42%
+
+**Method Stability:** DT ε=0.6 n=5 and ε=0.7 n=5 show lowest range across configs (3.15-4.05), indicating robust performance across diverse sampling designs.
+
+**MAD vs Oracle Penalty:** High consistency between metrics (8/10 exact winner agreement, 10/10 same method family). Validates MAD as primary evaluation metric for method comparison.
+
+**Visualizations:**
+- `analysis/figure/epsilon_curves_mad.png` - MAD across epsilon values (n=5), faceted by config
+- `analysis/figure/epsilon_curves_pct_mse.png` - Oracle MSE penalty across epsilon (n=5), faceted by config
+
+Both plots show DT n=5 curves vs DIC/WAIC horizontal baselines, configs ordered by sample size.
 
 ---
 
@@ -379,37 +474,29 @@ See `_for_claude/architecture_change_analysis.md` for complete details.
 Rscript run_summary.R <results_dir>    # Analyzes results
 ```
 
-**Current Work (Dec 2025):**
-- ✅ **equal_75 full results:** 50 comparisons complete (`_results_ca_full_comparison_equal75/`)
-- 🔄 **prop1p5pct full results:** 50 comparisons running (to have second complete dataset)
-- Expected runtime: ~25-50 hours
-
-**Next Steps:**
-- Analyze prop1p5pct full results (50 comparisons)
-- Compare equal_75 vs prop1p5pct patterns across full datasets
-- Consider TD-Oracle unbiasedness test (see Future Work section)
-
 ---
 
 ## Statistical Context
+
 This repo compares different model selection methods across **design-based synthetic datasets** that mimic real survey data.
 
 **Data Generation Approach:**
 - Population: Individual-level California PUMS data (`data/ca_pums_population.rds`)
 - Sampling: Stratified PPS (probability proportional to size) by PUMA
-- Per comparison: Draw independent sample → get z, d from sample; X from population
-- Predictors (X): Computed once from full population (fixed across comparisons)
-- Response (z, d): Survey-weighted direct estimates (vary across comparisons)
-- Will run 50-70 comparisons (depends on computational time)
+- Per comparison: Draw independent sample → compute survey-weighted estimates
+- Predictors (X): Computed from full population (fixed across comparisons)
+- Response (z, d): Survey-weighted direct estimates and variances (vary across comparisons)
 
-**What is new:** Using data thinning for model selection in small area estimation context. 
+**What is new:** Using data thinning for model selection in small area estimation context.
 
-The methods we will compare are:
-
-- Single-Fold Data Thinning (Primary method) with 1, 3, 5 repeats and evenly spaced out thinning/epsilon values (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8), using two different loss functions (MSE vs. Negative Log-Likelihood)
-- Multi-Fold (k=5) Data Thinning
-- DIC / WAIC
-- Empirical Simulation Study with two variants standard vs. Data Fission inspired approach 
+**Methods compared:**
+- **Data Thinning (DT):** Single-fold with varying ε and n_reps; multi-fold (k=3, k=5)
+  - Loss functions: MSE (primary), plugin NLL (some analyses)
+  - Epsilon range: 0.1-0.9 (9 values)
+  - Repetitions: n_reps ∈ {1, 3, 5}
+- **DIC / WAIC:** Information criteria benchmarks
+- **ESIM:** Empirical simulation (100 iterations, full comparisons only)
+- **OD-Oracle:** Observed-data oracle using true population parameters (ground truth) 
 
 
 ### Evaluation
@@ -469,23 +556,3 @@ deviations <- results %>%
   left_join(oracle_selections, by = "comp_no") %>%
   mutate(deviation = selected_nbasis - oracle_nbasis)
 ```
-
----
-
-## Future Work / Analysis Ideas
-
-### TD-Oracle Unbiasedness Test
-
-Create a standalone analysis to test DT unbiasedness more directly:
-
-**Approach:**
-- Use **single comparison** (e.g., comp_no=1)
-- Compute **TD-Oracle ground truth** with many thinnings (500-1000) for each (epsilon, nbasis)
-- Simulate **DT estimator distribution** with realistic n_reps (e.g., 3 reps, 100 replicates)
-- **Plot comparison**: Overlay TD-Oracle curve, DT mean curve, and DT uncertainty bands
-
-**Benefits:**
-- ✅ Much faster than multi-comparison approach
-- ✅ More direct test of unbiasedness (visual curve comparison)
-- ✅ Clearer message: "DT estimator tracks TD-Oracle ground truth"
-- ✅ Standalone script, doesn't need full pipeline
