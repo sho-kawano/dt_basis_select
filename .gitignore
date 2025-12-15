@@ -23,6 +23,7 @@ overall_summary.RDS
 sim_config.RDS
 all_results.csv
 *.nb.html
+*.html
 saved_results/
 
 # Test files
