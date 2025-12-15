@@ -36,7 +36,7 @@ for (cfg_info in all_configs) {
 
   # DT 1-fold (all epsilon values now available)
   dt_configs <- expand.grid(
-    eps = c(0.3, 0.5, 0.7),
+    eps = c(0.3, 0.4, 0.5, 0.6, 0.7, 0.8),
     n_reps = c(1, 3, 5),
     loss = "MSE",
     stringsAsFactors = FALSE
