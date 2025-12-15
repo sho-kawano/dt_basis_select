@@ -21,7 +21,7 @@ Comparison of **Data Thinning (DT)** vs **DIC/WAIC** for spatial basis function 
 - **4 Equal Allocation:** n = 40, 50, 75, 100 per PUMA
 - **6 Proportional PPS:** 0.5%, 1.0%, 1.25%, 1.5%, 1.75%, 2.0% sampling fractions
 
-**DT configs evaluated:** ε ∈ {0.3, 0.5, 0.7}, n_reps ∈ {1, 5}
+**DT configs evaluated:** ε ∈ {0.3, 0.4, 0.5, 0.6, 0.7, 0.8}, n_reps ∈ {1, 5}
 
 ---
 
@@ -439,7 +439,7 @@ config_levels <- all_sample_sizes %>%
 
 # Plot: DT n=5 only with DIC/WAIC references
 all_mad_plot %>%
-  filter(method == "DT" & n_reps_used == 5 | method %in% c("DIC", "WAIC")) %>%
+  filter((method == "DT" & n_reps_used == 5) | method %in% c("DIC", "WAIC")) %>%
   mutate(config = factor(config, levels = config_levels)) %>%
   ggplot(aes(x = epsilon, y = MAD)) +
   geom_hline(data = all_mad_plot %>% filter(method == "DIC") %>%
@@ -514,7 +514,7 @@ all_penalties_plot <- bind_rows(
 
 # Plot: DT n=5 only with DIC/WAIC references
 all_penalties_plot %>%
-  filter(method == "DT" & n_reps_used == 5 | method %in% c("DIC", "WAIC")) %>%
+  filter((method == "DT" & n_reps_used == 5) | method %in% c("DIC", "WAIC")) %>%
   mutate(config = factor(config, levels = config_levels)) %>%
   ggplot(aes(x = epsilon, y = mean_pct_increase)) +
   geom_hline(data = all_penalties_plot %>% filter(method == "DIC") %>%

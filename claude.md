@@ -61,9 +61,9 @@ This repository contains multiple related analyses studying data thinning for mo
 **Configuration:**
 - 10 sampling designs (4 equal allocation: n=40,50,75,100; 6 proportional PPS: 0.5%-2.0%)
 - 20 comparisons per config
-- DT: ε ∈ {0.1-0.9}, n_reps ∈ {1,3,5}, MSE loss only
-- DT k-fold: k=3, k=5
+- DT: ε ∈ {0.3, 0.4, 0.5, 0.6, 0.7, 0.8}, n_reps ∈ {1, 5}, MSE loss only
 - Benchmarks: DIC, WAIC, OD-Oracle
+- Note: No k-fold DT in this analysis
 
 **Output:**
 - `results_multi_config/dt_all_10configs.RDS`
@@ -333,7 +333,7 @@ DT provides substantial value in most sampling regimes, especially proportional 
 
 **Files:**
 - `test_sampling_designs_10configs.R` - Main execution script (runs all 10 configs)
-- `aggregate_all_10configs.R` - Aggregates all 10 configs (ε ∈ {0.1-0.9})
+- `aggregate_all_10configs.R` - Aggregates all 10 configs (ε ∈ {0.3-0.8}, n_reps ∈ {1, 5})
 - `visualize_epsilon_curves.R` - Creates epsilon sensitivity plots
 - `analysis/10_config_comprehensive.Rmd` - Analysis report with epsilon visualizations
 - `results_multi_config/dt_all_10configs.RDS` - All DT results
