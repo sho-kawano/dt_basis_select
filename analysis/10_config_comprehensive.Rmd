@@ -16,16 +16,12 @@ library(knitr)
 
 # Executive Summary
 
-This report presents a comprehensive comparison of **Data Thinning (DT)** against **DIC/WAIC** for spatial basis function model selection across **10 sampling designs**:
+Comparison of **Data Thinning (DT)** vs **DIC/WAIC** for spatial basis function model selection across **10 sampling designs**:
 
 - **4 Equal Allocation:** n = 40, 50, 75, 100 per PUMA
 - **6 Proportional PPS:** 0.5%, 1.0%, 1.25%, 1.5%, 1.75%, 2.0% sampling fractions
 
-**Key Results:**
-- **DT wins 7/10 configs (70%)**, with larger magnitude advantages (up to 4.65 MAD) vs DIC's wins (max 1.50 MAD)
-- **DIC sweet spot:** Mid-range sample sizes (n≈40-75), wins 3/3 in this range
-- **DT dominates high sample sizes:** n≥100 (massive wins of 3.90 and 4.65 MAD)
-- **Pattern:** DIC excels with moderate information, DT benefits from more data
+**DT configs evaluated:** ε ∈ {0.3, 0.5, 0.7}, n_reps ∈ {1, 5}
 
 ---
 
@@ -56,8 +52,6 @@ print(sort(unique(dt_all$config)))
 # Config Characteristics
 
 ## Equivalent Sample Sizes
-
-For proportional PPS configs, compute the actual sample sizes per PUMA:
 
 ```{r sample_sizes}
 # Load CA PUMS population
@@ -103,50 +97,68 @@ all_sample_sizes %>%
   kable(digits = 1, caption = "Equivalent Sample Sizes by Config")
 ```
 
-**Key observations:**
-- Proportional configs create **heterogeneous** sample sizes (large range from min to max)
-- Equal configs have **homogeneous** sample sizes (all PUMAs get same n)
-- Equivalent sample sizes range from ~31 (prop_0.5pct) to ~125 (prop_2pct)
-
 ---
 
 # Oracle Properties by Config
 
-## Oracle Optimal nbasis Distribution
+## Oracle Signal Strength
 
-```{r oracle_distributions, fig.height=8}
-oracle_summary <- oracle_selections %>%
-  group_by(config) %>%
+```{r oracle_signal}
+# Get oracle optimal nbasis per comparison
+oracle_selections_signal <- oracle_all %>%
+  filter(!is.na(mse_true)) %>%
+  group_by(config, comp_no) %>%
+  slice_min(mse_true, n = 1, with_ties = FALSE) %>%
+  select(config, comp_no, oracle_nbasis = nbasis, oracle_mse = mse_true)
+
+# Compute MSE penalties per comparison
+oracle_signal <- oracle_all %>%
+  filter(!is.na(mse_true)) %>%
+  left_join(oracle_selections_signal, by = c("config", "comp_no")) %>%
+  group_by(config, comp_no) %>%
   summarise(
-    mean_nbasis = mean(oracle_nbasis),
-    sd_nbasis = sd(oracle_nbasis),
-    min_nbasis = min(oracle_nbasis),
-    max_nbasis = max(oracle_nbasis),
+    mse_min = min(mse_true),
+    mse_max = max(mse_true),
+    mse_range = mse_max - mse_min,
+    pct_cost = (mse_max - mse_min) / mse_min * 100,
+    mse_cv = sd(mse_true) / mean(mse_true) * 100,
+    # Penalty for being ±6 away from optimal
+    oracle_nbasis = first(oracle_nbasis),
+    oracle_mse = first(oracle_mse),
+    # Find MSE at oracle_nbasis ± 6 (if exists)
+    mse_plus6 = mse_true[nbasis == oracle_nbasis + 6][1],
+    mse_minus6 = mse_true[nbasis == oracle_nbasis - 6][1],
     .groups = "drop"
   ) %>%
-  arrange(mean_nbasis)
+  mutate(
+    # Average penalty for ±6
+    pct_penalty_6 = ifelse(!is.na(mse_plus6) & !is.na(mse_minus6),
+                           ((mse_plus6 - oracle_mse) / oracle_mse * 100 +
+                            (mse_minus6 - oracle_mse) / oracle_mse * 100) / 2,
+                           ifelse(!is.na(mse_plus6),
+                                  (mse_plus6 - oracle_mse) / oracle_mse * 100,
+                                  ifelse(!is.na(mse_minus6),
+                                         (mse_minus6 - oracle_mse) / oracle_mse * 100,
+                                         NA)))
+  ) %>%
+  group_by(config) %>%
+  summarise(
+    mean_mse_range = mean(mse_range),
+    mean_pct_cost = mean(pct_cost),
+    mean_pct_penalty_6 = mean(pct_penalty_6, na.rm = TRUE),
+    mean_mse_cv = mean(mse_cv),
+    .groups = "drop"
+  ) %>%
+  left_join(all_sample_sizes %>% select(config, mean_n), by = "config") %>%
+  arrange(mean_n) %>%
+  select(-mean_n)
 
-# Plot oracle distributions
-oracle_selections %>%
-  ggplot(aes(x = oracle_nbasis)) +
-  geom_histogram(binwidth = 3, fill = "darkgreen", alpha = 0.7) +
-  facet_wrap(~config, ncol = 3, scales = "free_y") +
-  labs(title = "Oracle Optimal nbasis Distribution by Config",
-       x = "Optimal nbasis",
-       y = "Count") +
-  theme_minimal()
-```
-
-**Summary Statistics:**
-
-```{r oracle_table}
-oracle_summary %>%
-  kable(digits = 1, caption = "Oracle nbasis Statistics by Config")
+oracle_signal %>%
+  kable(digits = c(0, 5, 2, 2, 2),
+        caption = "Oracle Signal Strength: mean_pct_cost = % increase worst vs best; mean_pct_penalty_6 = avg % penalty at ±6 from optimal")
 ```
 
 ## Oracle MSE Curves
-
-Shows the oracle MSE landscape for each config (20 comparisons each):
 
 ```{r oracle_curves, fig.height=10}
 oracle_all %>%
@@ -187,7 +199,7 @@ waic_selections <- oracle_all %>%
 
 # DT selections (filter to MSE loss only, select best epsilon/n_reps per config)
 dt_selections <- dt_all %>%
-  filter(method_name == "dt_1fold", metric_type == "MSE") %>%
+  filter(method_name == "dt_1fold", loss_function == "MSE") %>%
   group_by(config, comp_no, epsilon, n_reps_used) %>%
   slice_min(metric, n = 1, with_ties = FALSE) %>%
   select(config, comp_no, epsilon, n_reps_used, dt_nbasis = nbasis)
@@ -206,8 +218,9 @@ waic_mad <- waic_selections %>%
   group_by(config) %>%
   summarise(MAD = mean(deviation), method = "WAIC", .groups = "drop")
 
-# Compute MAD for all DT configs
+# Compute MAD for all DT configs (filter to n=1 and n=5 only)
 dt_mad <- dt_selections %>%
+  filter(n_reps_used %in% c(1, 5)) %>%
   left_join(oracle_selections, by = c("config", "comp_no")) %>%
   mutate(deviation = abs(dt_nbasis - oracle_nbasis)) %>%
   group_by(config, epsilon, n_reps_used) %>%
@@ -215,91 +228,136 @@ dt_mad <- dt_selections %>%
   mutate(method = sprintf("DT ε=%.1f n=%d", epsilon, n_reps_used))
 ```
 
-## Performance Table: All Methods
-
-```{r performance_table}
-# Combine all MADs
+```{r combine_mad}
+# Combine all MADs (for downstream use)
 all_mad <- bind_rows(
   dic_mad,
   waic_mad,
   dt_mad %>% select(config, MAD, method)
 )
-
-# Pivot wider for comparison
-all_mad_wide <- all_mad %>%
-  pivot_wider(names_from = method, values_from = MAD) %>%
-  arrange(config)
-
-all_mad_wide %>%
-  kable(digits = 2, caption = "MAD by Method and Config (Lower is Better)")
 ```
 
-## Best Method per Config
+---
 
-```{r best_method}
-best_methods <- all_mad %>%
+# Oracle MSE Penalty Analysis
+
+## Computing Oracle MSE Penalties
+
+```{r oracle_penalties}
+# Get Oracle MSE at DIC's selected nbasis
+dic_oracle_penalty <- dic_selections %>%
+  left_join(oracle_all %>% select(config, comp_no, nbasis, mse_true),
+            by = c("config", "comp_no", "dic_nbasis" = "nbasis")) %>%
+  rename(dic_mse = mse_true) %>%
+  left_join(oracle_selections, by = c("config", "comp_no")) %>%
+  mutate(
+    pct_penalty = (dic_mse - oracle_mse) / oracle_mse * 100
+  ) %>%
+  group_by(config) %>%
+  summarise(
+    mean_pct_penalty = mean(pct_penalty),
+    method = "DIC",
+    .groups = "drop"
+  )
+
+# Get Oracle MSE at WAIC's selected nbasis
+waic_oracle_penalty <- waic_selections %>%
+  left_join(oracle_all %>% select(config, comp_no, nbasis, mse_true),
+            by = c("config", "comp_no", "waic_nbasis" = "nbasis")) %>%
+  rename(waic_mse = mse_true) %>%
+  left_join(oracle_selections, by = c("config", "comp_no")) %>%
+  mutate(
+    pct_penalty = (waic_mse - oracle_mse) / oracle_mse * 100
+  ) %>%
+  group_by(config) %>%
+  summarise(
+    mean_pct_penalty = mean(pct_penalty),
+    method = "WAIC",
+    .groups = "drop"
+  )
+
+# Get Oracle MSE at DT's selected nbasis (filtered to n=1, 5)
+dt_oracle_penalty <- dt_selections %>%
+  filter(n_reps_used %in% c(1, 5)) %>%
+  left_join(oracle_all %>% select(config, comp_no, nbasis, mse_true),
+            by = c("config", "comp_no", "dt_nbasis" = "nbasis")) %>%
+  rename(dt_mse = mse_true) %>%
+  left_join(oracle_selections, by = c("config", "comp_no")) %>%
+  mutate(
+    pct_penalty = (dt_mse - oracle_mse) / oracle_mse * 100
+  ) %>%
+  group_by(config, epsilon, n_reps_used) %>%
+  summarise(
+    mean_pct_penalty = mean(pct_penalty),
+    .groups = "drop"
+  ) %>%
+  mutate(method = sprintf("DT ε=%.1f n=%d", epsilon, n_reps_used))
+
+# Combine all penalties
+all_oracle_penalties <- bind_rows(
+  dic_oracle_penalty,
+  waic_oracle_penalty,
+  dt_oracle_penalty %>% select(config, mean_pct_penalty, method)
+)
+```
+
+## Best Methods: MAD vs Oracle Penalty
+
+```{r best_methods_comparison}
+# Best by MAD
+best_by_mad <- all_mad %>%
   group_by(config) %>%
   slice_min(MAD, n = 1, with_ties = FALSE) %>%
-  select(config, winner = method, best_mad = MAD)
+  select(config, winner_mad = method, best_mad = MAD)
 
-best_methods %>%
-  kable(digits = 2, caption = "Winner per Config")
-```
+# Best by Oracle Penalty
+best_by_oracle_penalty <- all_oracle_penalties %>%
+  group_by(config) %>%
+  slice_min(mean_pct_penalty, n = 1, with_ties = FALSE) %>%
+  select(config, winner_penalty = method, best_penalty = mean_pct_penalty)
 
-**Win Counts:**
+# Combine side-by-side (ordered by sample size)
+best_methods_combined <- best_by_mad %>%
+  left_join(best_by_oracle_penalty, by = "config") %>%
+  left_join(all_sample_sizes %>% select(config, mean_n), by = "config") %>%
+  arrange(mean_n) %>%
+  select(-mean_n)
 
-```{r win_counts}
-win_counts <- best_methods %>%
-  mutate(method_type = case_when(
-    grepl("^DT", winner) ~ "DT",
-    winner == "DIC" ~ "DIC",
-    winner == "WAIC" ~ "WAIC"
-  )) %>%
-  count(method_type, name = "wins")
-
-win_counts %>%
-  kable(caption = "Method Win Counts")
+best_methods_combined %>%
+  kable(digits = 2, caption = "Winner by MAD vs Oracle MSE Penalty")
 ```
 
 ---
 
 # DT vs DIC Gap Analysis
 
-## Computing Best DT vs DIC Gap
+## Visualization: DT vs DIC MAD Gap
 
-```{r dt_vs_dic_gap}
+```{r gap_plot_mad, fig.height=7}
 # Find best DT MAD per config
-best_dt <- dt_mad %>%
+best_dt_mad <- dt_mad %>%
   group_by(config) %>%
   slice_min(MAD, n = 1, with_ties = FALSE) %>%
   select(config, best_dt_method = method, best_dt_mad = MAD)
 
-# Join with DIC
-gap_analysis <- dic_mad %>%
-  left_join(best_dt, by = "config") %>%
+# Join with DIC MAD
+gap_analysis_mad <- dic_mad %>%
+  rename(dic_mad = MAD) %>%
+  select(config, dic_mad) %>%
+  left_join(best_dt_mad, by = "config") %>%
   mutate(
-    gap = best_dt_mad - MAD,
-    winner = ifelse(gap < 0, "DT", "DIC"),
-    gap_abs = abs(gap)
-  ) %>%
-  arrange(gap)
+    gap = best_dt_mad - dic_mad,
+    winner = ifelse(gap < 0, "DT", "DIC")
+  )
 
-gap_analysis %>%
-  select(config, DIC_MAD = MAD, best_dt_method, best_dt_mad, gap, winner) %>%
-  kable(digits = 2, caption = "Best DT vs DIC Gap (Negative = DT wins)")
-```
-
-## Visualization: DT Gap by Config
-
-```{r gap_plot, fig.height=7}
-gap_analysis %>%
+gap_analysis_mad %>%
   mutate(config = fct_reorder(config, gap)) %>%
   ggplot(aes(x = config, y = gap, fill = winner)) +
   geom_col() +
   geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
   coord_flip() +
   scale_fill_manual(values = c("DT" = "steelblue", "DIC" = "coral")) +
-  labs(title = "Best DT vs DIC Performance Gap",
+  labs(title = "Best DT vs DIC: MAD Gap",
        subtitle = "Negative = DT wins, Positive = DIC wins",
        x = "Config",
        y = "MAD Gap (DT - DIC)",
@@ -308,142 +366,270 @@ gap_analysis %>%
   theme(legend.position = "bottom")
 ```
 
+## Visualization: DT vs DIC Oracle Penalty Gap
+
+```{r gap_plot_oracle, fig.height=7}
+# Find best DT Oracle penalty per config
+best_dt_penalty <- dt_oracle_penalty %>%
+  group_by(config) %>%
+  slice_min(mean_pct_penalty, n = 1, with_ties = FALSE) %>%
+  select(config, best_dt_method = method, best_dt_penalty = mean_pct_penalty)
+
+# Join with DIC Oracle penalty
+gap_analysis_oracle <- dic_oracle_penalty %>%
+  rename(dic_penalty = mean_pct_penalty) %>%
+  select(config, dic_penalty) %>%
+  left_join(best_dt_penalty, by = "config") %>%
+  mutate(
+    gap = best_dt_penalty - dic_penalty,
+    winner = ifelse(gap < 0, "DT", "DIC")
+  )
+
+gap_analysis_oracle %>%
+  mutate(config = fct_reorder(config, gap)) %>%
+  ggplot(aes(x = config, y = gap, fill = winner)) +
+  geom_col() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  coord_flip() +
+  scale_fill_manual(values = c("DT" = "steelblue", "DIC" = "coral")) +
+  labs(title = "Best DT vs DIC: Oracle MSE Penalty Gap",
+       subtitle = "Negative = DT wins, Positive = DIC wins",
+       x = "Config",
+       y = "Oracle Penalty Gap % (DT - DIC)",
+       fill = "Winner") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
 ---
 
-# Key Findings
+# Epsilon Sensitivity Analysis
 
-## 1. DT Dominance in Proportional Allocation
+## Metric 1: Mean Absolute Deviation (MAD)
 
-```{r prop_configs}
-prop_configs <- c("prop_0.5pct", "prop_1pct", "prop_1p25pct",
-                  "prop_1p5pct", "prop_1p75pct", "prop_2pct")
+MAD measures the average distance (in nbasis units) between the selected model and the oracle optimal model.
 
-gap_analysis %>%
-  filter(config %in% prop_configs) %>%
-  select(config, DIC_MAD = MAD, best_dt_method, best_dt_mad, gap) %>%
-  kable(digits = 2, caption = "Proportional Allocation Results")
+```{r epsilon_curves_mad, fig.height=10, fig.width=12}
+# Prepare MAD data across epsilon values
+dt_mad_by_epsilon <- dt_selections %>%
+  left_join(oracle_selections, by = c("config", "comp_no")) %>%
+  mutate(deviation = abs(dt_nbasis - oracle_nbasis)) %>%
+  group_by(config, epsilon, n_reps_used) %>%
+  summarise(MAD = mean(deviation), .groups = "drop") %>%
+  mutate(method = "DT")
+
+# DIC/WAIC MAD (already computed earlier)
+dic_mad_for_plot <- dic_mad %>%
+  mutate(epsilon = NA, n_reps_used = NA)
+
+waic_mad_for_plot <- waic_mad %>%
+  mutate(epsilon = NA, n_reps_used = NA)
+
+# Combine
+all_mad_plot <- bind_rows(
+  dt_mad_by_epsilon,
+  dic_mad_for_plot,
+  waic_mad_for_plot
+)
+
+# Order configs by sample size
+config_levels <- all_sample_sizes %>%
+  arrange(mean_n) %>%
+  pull(config)
+
+# Plot: DT n=5 only with DIC/WAIC references
+all_mad_plot %>%
+  filter(method == "DT" & n_reps_used == 5 | method %in% c("DIC", "WAIC")) %>%
+  mutate(config = factor(config, levels = config_levels)) %>%
+  ggplot(aes(x = epsilon, y = MAD)) +
+  geom_hline(data = all_mad_plot %>% filter(method == "DIC") %>%
+               mutate(config = factor(config, levels = config_levels)),
+             aes(yintercept = MAD, color = "DIC"),
+             linetype = "dashed", linewidth = 0.8) +
+  geom_hline(data = all_mad_plot %>% filter(method == "WAIC") %>%
+               mutate(config = factor(config, levels = config_levels)),
+             aes(yintercept = MAD, color = "WAIC"),
+             linetype = "dashed", linewidth = 0.8) +
+  geom_line(data = all_mad_plot %>% filter(method == "DT", n_reps_used == 5) %>%
+              mutate(config = factor(config, levels = config_levels)),
+            aes(color = "DT n=5"), linewidth = 1.2) +
+  geom_point(data = all_mad_plot %>% filter(method == "DT", n_reps_used == 5) %>%
+               mutate(config = factor(config, levels = config_levels)),
+             aes(color = "DT n=5"), size = 2.5) +
+  facet_wrap(~config, ncol = 3, scales = "free_y") +
+  scale_color_manual(
+    values = c("DT n=5" = "steelblue", "DIC" = "coral", "WAIC" = "darkgoldenrod2"),
+    breaks = c("DT n=5", "DIC", "WAIC")
+  ) +
+  labs(
+    title = "Method Performance: Mean Absolute Deviation from Oracle Optimal",
+    subtitle = "DT with n=5 averaging (solid line) vs DIC/WAIC (dashed lines). Lower is better. Ordered by sample size.",
+    x = "Epsilon (ε)",
+    y = "MAD (nbasis units)",
+    color = "Method"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
 ```
 
-**Result:** DT wins all 6 proportional configs!
+## Metric 2: Oracle MSE Penalty
 
-## 2. DIC Excellence in Mid-Range Equal Allocation
+Oracle MSE Penalty measures the percentage increase in MSE from selecting a suboptimal model compared to the oracle optimal model.
 
-```{r equal_configs}
-equal_configs <- c("equal_40", "equal_50", "equal_75", "equal_100")
+```{r epsilon_curves_penalty, fig.height=10, fig.width=12}
+# Prepare data for oracle penalty plot
+dt_oracle_penalty_full <- dt_selections %>%
+  left_join(oracle_all %>% select(config, comp_no, nbasis, mse_true),
+            by = c("config", "comp_no", "dt_nbasis" = "nbasis")) %>%
+  rename(dt_mse = mse_true) %>%
+  left_join(oracle_selections, by = c("config", "comp_no")) %>%
+  mutate(pct_increase = (dt_mse - oracle_mse) / oracle_mse * 100) %>%
+  group_by(config, epsilon, n_reps_used) %>%
+  summarise(
+    mean_pct_increase = mean(pct_increase),
+    se_pct_increase = sd(pct_increase) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  mutate(method = "DT")
 
-gap_analysis %>%
-  filter(config %in% equal_configs) %>%
-  select(config, DIC_MAD = MAD, best_dt_method, best_dt_mad, gap, winner) %>%
-  kable(digits = 2, caption = "Equal Allocation Results")
+# DIC penalties
+dic_oracle_penalty_full <- dic_oracle_penalty %>%
+  select(config, mean_pct_increase = mean_pct_penalty) %>%
+  mutate(method = "DIC", epsilon = NA, n_reps_used = NA)
+
+# WAIC penalties
+waic_oracle_penalty_full <- waic_oracle_penalty %>%
+  select(config, mean_pct_increase = mean_pct_penalty) %>%
+  mutate(method = "WAIC", epsilon = NA, n_reps_used = NA)
+
+# Combine all
+all_penalties_plot <- bind_rows(
+  dt_oracle_penalty_full,
+  dic_oracle_penalty_full,
+  waic_oracle_penalty_full
+)
+
+# Plot: DT n=5 only with DIC/WAIC references
+all_penalties_plot %>%
+  filter(method == "DT" & n_reps_used == 5 | method %in% c("DIC", "WAIC")) %>%
+  mutate(config = factor(config, levels = config_levels)) %>%
+  ggplot(aes(x = epsilon, y = mean_pct_increase)) +
+  geom_hline(data = all_penalties_plot %>% filter(method == "DIC") %>%
+               mutate(config = factor(config, levels = config_levels)),
+             aes(yintercept = mean_pct_increase, color = "DIC"),
+             linetype = "dashed", linewidth = 0.8) +
+  geom_hline(data = all_penalties_plot %>% filter(method == "WAIC") %>%
+               mutate(config = factor(config, levels = config_levels)),
+             aes(yintercept = mean_pct_increase, color = "WAIC"),
+             linetype = "dashed", linewidth = 0.8) +
+  geom_line(data = all_penalties_plot %>% filter(method == "DT", n_reps_used == 5) %>%
+              mutate(config = factor(config, levels = config_levels)),
+            aes(color = "DT n=5"), linewidth = 1.2) +
+  geom_point(data = all_penalties_plot %>% filter(method == "DT", n_reps_used == 5) %>%
+               mutate(config = factor(config, levels = config_levels)),
+             aes(color = "DT n=5"), size = 2.5) +
+  facet_wrap(~config, ncol = 3, scales = "free_y") +
+  scale_color_manual(
+    values = c("DT n=5" = "steelblue", "DIC" = "coral", "WAIC" = "darkgoldenrod2"),
+    breaks = c("DT n=5", "DIC", "WAIC")
+  ) +
+  labs(
+    title = "Method Performance: Percentage Increase in MSE from Oracle Model",
+    subtitle = "DT with n=5 averaging (solid line) vs DIC/WAIC (dashed lines). Lower is better. Ordered by sample size.",
+    x = "Epsilon (ε)",
+    y = "Percentage Increase in MSE (%)",
+    color = "Method"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
 ```
 
-**Result:** DIC wins 2/4 equal configs (equal_40, equal_75), but loses at extremes (equal_50, equal_100).
+## Best Epsilon Per Config
 
-## 3. Top 3 Methods per Config
+```{r best_epsilon}
+best_epsilon_table <- all_penalties_plot %>%
+  filter(method == "DT", n_reps_used == 5) %>%
+  group_by(config) %>%
+  slice_min(mean_pct_increase, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  left_join(all_sample_sizes %>% select(config, mean_n), by = "config") %>%
+  arrange(mean_n) %>%
+  select(config, best_epsilon = epsilon, pct_increase = mean_pct_increase) %>%
+  left_join(
+    dic_oracle_penalty_full %>% select(config, DIC_pct = mean_pct_increase),
+    by = "config"
+  ) %>%
+  mutate(
+    dt_vs_dic = pct_increase - DIC_pct,
+    winner = ifelse(dt_vs_dic < 0, "DT", "DIC")
+  )
 
-```{r top3}
-for (cfg in sort(unique(all_mad$config))) {
+best_epsilon_table %>%
+  kable(digits = 2,
+        caption = "Best epsilon (n=5) per config with comparison to DIC. Negative dt_vs_dic = DT wins.")
+```
+
+## Mean Performance Across Configs
+
+```{r epsilon_summary}
+epsilon_summary <- all_penalties_plot %>%
+  filter((method == "DT" & n_reps_used == 5) | method == "DIC") %>%
+  group_by(method, epsilon) %>%
+  summarise(
+    mean_pct = mean(mean_pct_increase),
+    sd_pct = sd(mean_pct_increase),
+    .groups = "drop"
+  ) %>%
+  arrange(mean_pct)
+
+epsilon_summary %>%
+  kable(digits = 2,
+        caption = "Mean percentage increase in MSE across 10 configs")
+```
+
+---
+
+# Competitive Landscape
+
+## Method Rankings: Detailed
+
+```{r method_rankings, results='asis'}
+# Order configs by sample size
+config_order <- all_sample_sizes %>%
+  arrange(mean_n) %>%
+  pull(config)
+
+for (cfg in config_order) {
   cat(sprintf("\n### %s\n\n", cfg))
 
-  top3 <- all_mad %>%
+  cat("**By MAD:**\n\n")
+  rankings_mad <- all_mad %>%
     filter(config == cfg) %>%
     arrange(MAD) %>%
-    head(3) %>%
     mutate(rank = 1:n()) %>%
     select(rank, method, MAD)
 
-  print(kable(top3, digits = 2))
+  print(kable(rankings_mad, digits = 2))
+  cat("\n\n")
+
+  cat("**By Oracle MSE Penalty:**\n\n")
+  rankings_penalty <- all_oracle_penalties %>%
+    filter(config == cfg) %>%
+    arrange(mean_pct_penalty) %>%
+    mutate(rank = 1:n()) %>%
+    select(rank, method, penalty = mean_pct_penalty)
+
+  print(kable(rankings_penalty, digits = 2))
+  cat("\n\n")
 }
 ```
 
----
-
-# Method Stability Analysis
-
-## MAD Range Across Configs
-
-```{r stability}
-method_stability <- all_mad %>%
-  group_by(method) %>%
-  summarise(
-    mean_mad = mean(MAD, na.rm = TRUE),
-    min_mad = min(MAD, na.rm = TRUE),
-    max_mad = max(MAD, na.rm = TRUE),
-    range_mad = max_mad - min_mad,
-    sd_mad = sd(MAD, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  arrange(mean_mad)
-
-method_stability %>%
-  filter(!is.na(mean_mad)) %>%
-  kable(digits = 2, caption = "Method Stability (Lower Range = More Stable)")
-```
-
-**Key Insight:** DT methods show narrower ranges (more stable) compared to DIC/WAIC across diverse sampling regimes.
-
----
-
-# Conclusions
-
-## Overall Performance
-
-**Win Counts:**
-- **DT:** 7/10 configs (70%)
-- **DIC:** 3/10 configs (30%)
-
-**Magnitude of Advantages:**
-- **Largest DT win:** prop_1p75pct (+4.65 MAD over DIC)
-- **Largest DIC win:** prop_1pct (+1.50 MAD over DT)
-- DT's advantages are **3× larger** than DIC's on average
-
-## Sample Size Patterns
-
-**DIC Sweet Spot (n≈40-75):**
-- **equal_40** (n=40): DIC wins by 1.20 MAD
-- **prop_1pct** (n≈63): DIC wins by 1.50 MAD (strongest DIC performance)
-- **equal_75** (n=75): DIC wins by 1.20 MAD
-- DIC wins **3/3 configs** in this range (equal_50 at n=50 barely loses by 0.75)
-
-**DT Dominance (n≥100):**
-- **equal_100** (n=100): DT wins by **3.90 MAD**
-- **prop_1p75pct** (n≈110): DT wins by **4.65 MAD** (largest margin overall)
-- **prop_2pct** (n≈125): DT wins by 1.65 MAD
-- DT wins **3/3 configs** with massive advantages
-
-**Low Sample Sizes (n<40):**
-- **prop_0.5pct** (n≈31): DT wins by 1.05 MAD (possibly fluke with only 20 comparisons)
-
-## Allocation Type Patterns
-
-**Proportional PPS (6 configs):**
-- **DT wins:** 5/6 (prop_0.5pct, prop_1p25pct, prop_1p5pct, prop_1p75pct, prop_2pct)
-- **DIC wins:** 1/6 (prop_1pct at n≈63)
-- **Not a DT sweep:** DIC competitive at moderate sample sizes
-
-**Equal Allocation (4 configs):**
-- **DT wins:** 2/4 (equal_50, equal_100)
-- **DIC wins:** 2/4 (equal_40, equal_75)
-- **Even split** but DT's wins are much larger (3.90 vs 1.20)
-
-## Method-Specific Insights
-
-**Best Overall Performance:**
-- **prop_1p25pct:** DT ε=0.7 n=5 achieves MAD=4.35 (best across all configs)
-
-**DT Configuration Patterns:**
-- **High sample sizes (n≥100):** ε=0.5-0.7, n=3-5 all perform well
-- **Moderate sample sizes:** ε=0.7 n=5 most reliable
-- **Low sample sizes:** ε=0.5 n=1 can work (less averaging needed)
-
-## Honest Assessment
-
-DT provides substantial value in **most** sampling regimes (70% of configs), especially at higher sample sizes where its advantages are dramatic. DIC remains competitive and even dominant in a specific regime (mid-range sample sizes, n≈40-75), suggesting both methods have complementary strengths:
-
-- **Use DIC when:** n≈40-75, equal allocation, moderate information
-- **Use DT when:** n≥100, need robustness across varied conditions, high sample sizes
-
-The pattern suggests DT **benefits from more data** while DIC **excels with moderate information**, possibly because DT's data splitting is less costly when the original sample is larger.
 
 ---
 
