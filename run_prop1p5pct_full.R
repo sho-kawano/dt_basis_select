@@ -26,7 +26,7 @@ cat("===========================================================================
 model_config <- list(
   # Study design
   n_comp = 50, # Total comparisons (can increase to 60-70)
-  results_dir = "_results_prop1p5pct_production",
+  results_dir = "_results_prop1p5pct_full_comparison",
 
   # Data sources
   population_file = "data/ca_pums_population.rds",
@@ -64,7 +64,7 @@ model_config <- list(
   nthin = 1,
 
   # Data thinning settings
-  eps_values = rep(0.4, 0.7, by = 0.1), # Epsilon values to test
+  eps_values = (3:8)*0.1, # Epsilon values to test (FIXED: was rep())
   n_reps_dt = c(1, 3, 5), # Number of repetitions
   k_folds = 5, # For k-fold DT
 
@@ -165,7 +165,7 @@ elapsed <- proc.time() - t_start
 cat(sprintf("\n✓ ESIM setup complete (%.1f sec)\n", elapsed[3]))
 
 # ==============================================================================
-# PART 3: FULL DATA FITS (Oracle + DIC + WAIC)
+# PART 3: FULL DATA FITS
 # ==============================================================================
 
 cat("\n")
@@ -309,20 +309,7 @@ cat(sprintf(
 ))
 
 # ==============================================================================
-# SAVE CONFIGURATION
-# ==============================================================================
-
-cat("\n")
-cat("================================================================================\n")
-cat("  SAVING CONFIGURATION\n")
-cat("================================================================================\n\n")
-
-config_file <- file.path(model_config$results_dir, "model_config.RDS")
-saveRDS(model_config, config_file)
-cat(sprintf("✓ Configuration saved to: %s\n", config_file))
-
-# ==============================================================================
-# COMPLETE
+# SAVE CONFIGURATION & COMPLETE
 # ==============================================================================
 
 cat("\n")
@@ -330,19 +317,13 @@ cat("===========================================================================
 cat("  PRODUCTION RUN COMPLETE!\n")
 cat("================================================================================\n\n")
 
-cat(sprintf("Results saved to: %s/\n\n", model_config$results_dir))
+cat(sprintf("All results saved to: %s/\n\n", model_config$results_dir))
 
-cat("Next steps:\n")
-cat("  1. Run summary analysis:\n")
+cat("IMPORTANT: Update model_config.RDS to include the fixed eps_values:\n")
+config_file <- file.path(model_config$results_dir, "model_config.RDS")
+saveRDS(model_config, config_file)
+cat(sprintf("✓ Updated configuration saved to: %s\n\n", config_file))
+
+cat("Next step:\n")
+cat("  Run summary analysis to regenerate results.RDS:\n")
 cat(sprintf("     Rscript run_summary.R %s\n\n", model_config$results_dir))
-
-cat("  2. Generate plots and tables:\n")
-cat("     # Open analysis/prop1p5pct_results.Rmd\n\n")
-
-cat("Files to check:\n")
-cat(sprintf("  - %s/results.RDS (aggregated results)\n", model_config$results_dir))
-cat(sprintf("  - %s/model_config.RDS (configuration)\n", model_config$results_dir))
-cat(sprintf(
-  "  - %s/comparison_*/chains.RDS (MCMC chains)\n\n",
-  model_config$results_dir
-))

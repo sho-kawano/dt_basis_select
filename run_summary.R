@@ -65,7 +65,8 @@ for (i in seq_len(nrow(dt_configs))) {
       group_by(comp_no) %>%
       mutate(
         rank = rank(metric), method_name = "dt_1fold",
-        loss_function = config_obj$loss, epsilon = config_obj$eps, n_reps_used = config_obj$n_reps
+        loss_function = config_obj$loss, epsilon = config_obj$eps, n_reps_used = config_obj$n_reps,
+        method = sprintf("DT 1-fold (ε=%.1f, reps=%d, %s)", config_obj$eps, config_obj$n_reps, config_obj$loss)
       )
   }, config_obj = cfg, res_dir = results_dir)
 
@@ -90,7 +91,11 @@ for (loss in c("MSE", "plugin_NLL", "predictive_NLL")) {
       n_reps_to_use = 1
     ) %>%
       group_by(comp_no) %>%
-      mutate(rank = rank(metric), method_name = "dt_5fold", loss_function = loss_fn)
+      mutate(
+        rank = rank(metric), method_name = "dt_5fold", loss_function = loss_fn,
+        method = sprintf("DT 5-fold (%s)", loss_fn),
+        epsilon = NA_real_, n_reps_used = NA_integer_
+      )
   }, res_dir = results_dir, loss_fn = loss)
 
   result <- bind_rows(result)
@@ -113,7 +118,11 @@ for (version in c("standard", "data_fission")) {
     source("sim_functions/summary_esim.R")
     summary_esim(x, results_dir = res_dir, validation = val_method, n_iters = n_iters) %>%
       group_by(comp_no) %>%
-      mutate(rank = rank(metric), method_name = meth_name, loss_function = NA)
+      mutate(
+        rank = rank(metric), method_name = meth_name, loss_function = NA_character_,
+        method = ifelse(val_method == "standard", "ESIM (standard)", "ESIM (data fission)"),
+        epsilon = NA_real_, n_reps_used = NA_integer_
+      )
   }, val_method = version, meth_name = method, res_dir = results_dir, n_iters = model_config$n_iter_esim)
 
   result <- bind_rows(result)
@@ -139,28 +148,31 @@ fulldata_oracle_raw <- bind_rows(fulldata_oracle_raw)
 oracle_results <- fulldata_oracle_raw %>%
   transmute(
     comp_no, model, nbasis,
-    method_name = "oracle", loss_function = NA,
+    method_name = "oracle", loss_function = "mse_true",
     metric = mse_true, rank = mse_true_rank,
-    method = "OD-Oracle MSE", metric_type = "mse_true"
+    method = "OD-Oracle MSE",
+    epsilon = NA_real_, n_reps_used = NA_integer_
   )
 
 dic_results <- fulldata_oracle_raw %>%
   group_by(comp_no) %>%
   transmute(
-    model, nbasis,
-    method_name = "dic", loss_function = NA,
+    comp_no, model, nbasis,
+    method_name = "dic", loss_function = "DIC",
     metric = DIC, rank = rank(DIC),
-    method = "DIC", metric_type = "DIC"
+    method = "DIC",
+    epsilon = NA_real_, n_reps_used = NA_integer_
   ) %>%
   ungroup()
 
 waic_results <- fulldata_oracle_raw %>%
   group_by(comp_no) %>%
   transmute(
-    model, nbasis,
-    method_name = "waic", loss_function = NA,
+    comp_no, model, nbasis,
+    method_name = "waic", loss_function = "WAIC",
     metric = WAIC, rank = rank(WAIC),
-    method = "WAIC", metric_type = "WAIC"
+    method = "WAIC",
+    epsilon = NA_real_, n_reps_used = NA_integer_
   ) %>%
   ungroup()
 
@@ -173,14 +185,8 @@ stopCluster(cl)
 cat("\n=== SAVING RESULTS ===\n")
 
 all_results <- bind_rows(
-  dt_results %>% select(
-    comp_no, method_name, loss_function, model, nbasis, metric,
-    rank, method, metric_type, epsilon, n_reps_used
-  ),
-  esim_results %>% select(
-    comp_no, method_name, loss_function, model, nbasis, metric,
-    rank, method, metric_type
-  ),
+  dt_results,
+  esim_results,
   oracle_results,
   dic_results,
   waic_results
@@ -197,7 +203,7 @@ cat("\n=== MODEL SELECTION PERFORMANCE ===\n\n")
 
 # Oracle best per comparison
 oracle_best <- all_results %>%
-  filter(method_name == "oracle", metric_type == "mse_true") %>%
+  filter(method_name == "oracle", loss_function == "mse_true") %>%
   group_by(comp_no) %>%
   slice_min(metric, n = 1, with_ties = FALSE) %>%
   select(comp_no, best_model = model)
@@ -205,7 +211,7 @@ oracle_best <- all_results %>%
 # Performance function
 calc_perf <- function(data, oracle) {
   oracle_models <- all_results %>%
-    filter(method_name == "oracle", metric_type == "mse_true") %>%
+    filter(method_name == "oracle", loss_function == "mse_true") %>%
     pull(model) %>%
     unique()
 
@@ -224,7 +230,7 @@ calc_perf <- function(data, oracle) {
 
   # Median absolute difference from oracle-selected nbasis
   oracle_nbasis <- all_results %>%
-    filter(method_name == "oracle", metric_type == "mse_true") %>%
+    filter(method_name == "oracle", loss_function == "mse_true") %>%
     group_by(comp_no) %>%
     slice_min(metric, n = 1, with_ties = FALSE) %>%
     ungroup() %>%
@@ -238,7 +244,7 @@ calc_perf <- function(data, oracle) {
 
   # Kendall's tau
   oracle_ranks <- all_results %>%
-    filter(method_name == "oracle", metric_type == "mse_true") %>%
+    filter(method_name == "oracle", loss_function == "mse_true") %>%
     select(comp_no, model, oracle_rank = rank)
 
   tau <- data_filt %>%
