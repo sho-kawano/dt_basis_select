@@ -78,7 +78,7 @@ configs_to_run <- list(
     name = "equal_75",
     equal_allocation = TRUE,
     equal_n = 75,
-    results_dir = "_results_equal75_comparison"
+    results_dir = "_results_equal75_rerun"
   ),
   list(
     name = "equal_100",
@@ -249,11 +249,11 @@ for (config_idx in seq_along(configs_to_run)) {
   elapsed <- proc.time() - t1
   cat(sprintf("✓ DT 5-fold complete (%.1f sec)\n\n", elapsed[3]))
 
-  # DT 1-fold (epsilon 0.3, 0.5, 0.7 × 5 reps)
+  # DT 1-fold (epsilon 0.1-0.9 × 5 reps)
   cat("Running DT 1-fold...\n")
   t1 <- proc.time()
 
-  eps_values <- c(0.3, 0.5, 0.7)
+  eps_values <- seq(0.1, 0.9, by = 0.1)  # 9 epsilon values
   n_reps <- 5
 
   cl <- makeCluster(config$n_cores, type = "FORK")

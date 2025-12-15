@@ -34,10 +34,10 @@ for (cfg_info in all_configs) {
   cl <- makeForkCluster(cfg_info$n_cores)
   registerDoParallel(cl)
 
-  # DT 1-fold (all epsilon values now available)
+  # DT 1-fold (epsilon grid 0.3-0.8 for 10-config analysis)
   dt_configs <- expand.grid(
-    eps = c(0.3, 0.5, 0.7),
-    n_reps = c(1, 3, 5),
+    eps = seq(0.3, 0.8, by = 0.1),  # 6 epsilon values (0.3, 0.4, 0.5, 0.6, 0.7, 0.8)
+    n_reps = c(1, 5),  # Only n=1 and n=5 for this analysis
     loss = "MSE",
     stringsAsFactors = FALSE
   )
