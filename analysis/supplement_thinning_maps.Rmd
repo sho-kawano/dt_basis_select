@@ -1,0 +1,117 @@
+---
+title: "Supplement: Data Thinning Illustration (6 Maps)"
+output:
+  html_document:
+    toc: false
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 14, fig.height = 8)
+library(tidyverse)
+library(sf)
+library(tigris)
+library(patchwork)
+options(tigris_use_cache = TRUE)
+```
+
+Shows how data thinning splits one direct estimate $(z_i, d_i)$ into two
+unbiased estimates $(z_{1i}, d_i/\varepsilon)$ and $(z_{2i}, d_i/(1-\varepsilon))$.
+
+One sample from the 1.75% proportional allocation design, $\varepsilon = 0.7$.
+
+```{r load_and_thin}
+comp_dir <- "../_results_prop1p75pct/comparison_001"
+z_obj <- readRDS(file.path(comp_dir, "z.RDS"))
+d_obj <- readRDS(file.path(comp_dir, "d.RDS"))
+
+z        <- z_obj$values
+d        <- d_obj$values
+puma_ids <- z_obj$puma
+eps      <- 0.7
+
+# Thinning (matches run_dt.R):
+#   z_train = eps*z + sqrt(eps*(1-eps)*d) * xi
+#   z_train ~ N(eps*theta, eps*d)
+#   z_test  = z - z_train ~ N((1-eps)*theta, (1-eps)*d)
+# Rescaled to be unbiased for theta:
+#   z1 = z_train / eps       ~ N(theta, d/eps)
+#   z2 = z_test  / (1-eps)   ~ N(theta, d/(1-eps))
+set.seed(42)
+noise   <- rnorm(length(z))
+z_train <- eps * z + sqrt(eps * (1 - eps) * d) * noise
+z_test  <- z - z_train
+z1      <- z_train / eps
+z2      <- z_test  / (1 - eps)
+
+# Verify reconstruction: eps*z1 + (1-eps)*z2 = z
+cat(sprintf("Max reconstruction error: %.2e\n", max(abs(eps*z1 + (1-eps)*z2 - z))))
+cat(sprintf("n PUMAs: %d,  z range: [%.3f, %.3f]\n", length(z), min(z), max(z)))
+```
+
+```{r get_geometry}
+ca_pumas <- pumas(state = "CA", cb = TRUE, year = 2020)
+
+df <- tibble(
+  PUMA   = puma_ids,
+  z      = z,
+  z1     = z1,
+  z2     = z2,
+  d      = d,
+  d_eps  = d / eps,
+  d_1eps = d / (1 - eps)
+)
+
+map_data <- ca_pumas %>%
+  mutate(PUMA = PUMACE20) %>%
+  inner_join(df, by = "PUMA")
+
+cat(sprintf("Matched %d of %d PUMAs\n", nrow(map_data), length(puma_ids)))
+```
+
+```{r six_maps, fig.width=13, fig.height=6}
+zlim <- range(c(map_data$z, map_data$z1, map_data$z2))
+dlim <- range(c(map_data$d, map_data$d_eps, map_data$d_1eps))
+
+make_map <- function(data, fill_var, title, limits, palette) {
+  ggplot(data) +
+    geom_sf(aes(fill = .data[[fill_var]]), color = "gray40", linewidth = 0.08) +
+    scale_fill_distiller(palette = palette, direction = 1,
+                         limits = limits, name = NULL,
+                         breaks = scales::pretty_breaks(n = 3)) +
+    labs(title = title) +
+    theme_void() +
+    theme(
+      plot.title        = element_text(size = 12, hjust = 0.5, margin = margin(b = 4)),
+      legend.position   = "right",
+      legend.key.width  = unit(0.35, "cm"),
+      legend.key.height = unit(1.8, "cm"),
+      legend.text       = element_text(size = 8)
+    )
+}
+
+p1 <- make_map(map_data, "z",      expression(y[i]),                   zlim, "Blues")
+p2 <- make_map(map_data, "z1",     expression(y[i]^{(1)}/epsilon),     zlim, "Blues")
+p3 <- make_map(map_data, "z2",     expression(y[i]^{(2)}/(1-epsilon)), zlim, "Blues")
+p4 <- make_map(map_data, "d",      expression(d[i]),                   dlim, "Oranges")
+p5 <- make_map(map_data, "d_eps",  expression(d[i]/epsilon),           dlim, "Oranges")
+p6 <- make_map(map_data, "d_1eps", expression(d[i]/(1-epsilon)),       dlim, "Oranges")
+
+row1 <- (p1 | p2 | p3) + plot_layout(guides = "collect") &
+  theme(legend.position = "right")
+row2 <- (p4 | p5 | p6) + plot_layout(guides = "collect") &
+  theme(legend.position = "right")
+
+row1 / row2 +
+  plot_annotation(
+    subtitle = bquote("One sample, 1.75% proportional allocation design," ~ epsilon ~ "= 0.7"),
+    theme = theme(
+      plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray40")
+    )
+  )
+```
+
+```{r save}
+ggsave("plot_supplement_thinning_maps.png", width = 15, height = 9, dpi = 200)
+```

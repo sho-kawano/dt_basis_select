@@ -1,0 +1,128 @@
+---
+title: "Section 4: Repeated vs Multi-Fold Thinning"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(xtable)
+```
+
+Empirical comparison: **repeated single-fold** ($R=5$, $\varepsilon=0.8$) vs
+**multi-fold** ($K=5$, $\varepsilon_{\text{test}}=1/5$). Both use 80/20 train/test.
+$S=50$ samples per design.
+
+```{r load-data}
+
+get_fold_mse <- function(comp_folder) {
+  d_var <- readRDS(file.path(comp_folder, "d.RDS"))$values
+
+  # Repeated single-fold: eps=0.8, 5 independent reps
+  dt1_folder <- file.path(comp_folder, "dt_1fold", "eps_0.80")
+  rep_results <- lapply(1:5, function(r) {
+    env <- new.env()
+    load(file.path(dt1_folder, sprintf("dt_split_1fold_rep%d.RDA", r)), envir = env)
+    z_test <- env$z_test[, 1]
+    fit <- readRDS(file.path(dt1_folder, sprintf("1fold_rep%d.RDS", r)))
+    fit %>%
+      group_by(nbasis) %>%
+      summarise(mse = mean((mean/0.8 - z_test/0.2)^2) - mean(d_var/0.2), .groups = "drop") %>%
+      mutate(fold_rep = r, method = "Repeated")
+  })
+
+  # Multi-fold K=5: one split, 5 dependent folds
+  dt5_folder <- file.path(comp_folder, "dt_5fold")
+  env <- new.env()
+  load(file.path(dt5_folder, "dt_split_5fold_rep1.RDA"), envir = env)
+  z_test_all <- env$z_test
+
+  mf_results <- lapply(1:5, function(k) {
+    fit <- readRDS(file.path(dt5_folder, sprintf("5fold_rep1_fold%d.RDS", k)))
+    z_test_k <- z_test_all[, k]
+    fit %>%
+      group_by(nbasis) %>%
+      summarise(mse = mean((mean/0.8 - z_test_k/0.2)^2) - mean(d_var/0.2), .groups = "drop") %>%
+      mutate(fold_rep = k, method = "Multi-fold")
+  })
+
+  bind_rows(c(rep_results, mf_results))
+}
+
+designs <- list(
+  list(dir = "_results_equal50", label = "n=50", n_comp = 50),
+  list(dir = "_results_equal75", label = "n=75", n_comp = 50),
+  list(dir = "_results_equal100", label = "n=100", n_comp = 50)
+)
+
+all_fold_mse <- lapply(designs, function(des) {
+  comps <- lapply(1:des$n_comp, function(s) {
+    comp_folder <- file.path("..", des$dir, sprintf("comparison_%03d", s))
+    get_fold_mse(comp_folder) %>% mutate(comp_no = s)
+  })
+  bind_rows(comps) %>% mutate(design = des$label)
+}) %>% bind_rows()
+```
+
+```{r variance-ratios}
+nbasis_focus <- c(6, 18, 30, 42)
+
+# Variance of the averaged MSE estimator across S=50 samples
+# For each sample: average MSE over R=5 reps (or K=5 folds), then
+# compute Var(avg_MSE) across the 50 samples for each method
+averaged_mse <- all_fold_mse %>%
+  filter(nbasis %in% nbasis_focus) %>%
+  group_by(design, comp_no, method, nbasis) %>%
+  summarise(avg_mse = mean(mse), .groups = "drop")
+
+var_across <- averaged_mse %>%
+  group_by(design, method, nbasis) %>%
+  summarise(var_mse = var(avg_mse), .groups = "drop")
+
+ratio_table <- var_across %>%
+  pivot_wider(names_from = method, values_from = var_mse) %>%
+  mutate(ratio = round(`Multi-fold` / Repeated, 2))
+
+ratio_wide <- ratio_table %>%
+  select(design, nbasis, ratio) %>%
+  pivot_wider(names_from = nbasis, values_from = ratio, names_prefix = "p=")
+
+# HTML display
+ratio_wide %>%
+  kable(caption = "Variance ratio (multi-fold / repeated), S=50")
+
+# LaTeX table — order rows by n, format design labels for LaTeX
+latex_table <- ratio_wide %>%
+  mutate(design = factor(design, levels = c("n=50", "n=75", "n=100"))) %>%
+  arrange(design) %>%
+  mutate(design = paste0("$", design, "$")) %>%
+  rename(Design = design, `$p=6$` = `p=6`, `$p=18$` = `p=18`,
+         `$p=30$` = `p=30`, `$p=42$` = `p=42`)
+
+latex_code <- capture.output({
+  print(xtable(latex_table,
+               caption = "Variance ratio (multi-fold / repeated) for the averaged MSE estimator across equal-allocation designs, where $n$ denotes the per-area target sample size. $p$ denotes the number of spatial basis functions included as fixed effects in the Fay-Herriot model and  signals model complexity. Ratios above 1 indicate higher variance for multi-fold thinning. Results based on 50 samples per design.",
+               label = "tab:multifold",
+               align = c("l", "l", "c", "c", "c", "c")),
+        include.rownames = FALSE,
+        sanitize.text.function = identity,
+        booktabs = TRUE)
+})
+
+writeLines(latex_code, "table_multifold.tex")
+cat("LaTeX table written to: table_multifold.tex\n")
+```
+
+**Variance ratio (multi-fold / repeated) for the averaged MSE estimator, $S=50$:**
+
+- Ratios range from `r min(ratio_table$ratio)` to `r max(ratio_table$ratio)` across designs and model complexities
+- Multi-fold is at or above repeated thinning in most configurations, but the margin varies substantially
+- At $n=50$, the ratio is near 1 — the irreducible variance (across datasets) dominates, and the method distinction barely matters
+- Ratios increase with model complexity $p$ within each design, consistent with the $\rho(y) > 0$ mechanism
+- A practitioner cannot predict in advance where their setting falls in this range; repeated thinning provides guaranteed $1/R$ variance reduction regardless
