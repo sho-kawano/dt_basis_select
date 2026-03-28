@@ -61,7 +61,7 @@ create_response_variable <- function(df, response_var) {
 # Core function to generate the data and set things up
 # ==================================================
 
-setup_comp <- function(ncomps, results_dir, model_config) {
+setup_comp <- function(ncomps, results_dir, model_config, start_from = 1, comp_nos = NULL, seed_offset = 0) {
   # Load population data (REQUIRED - no defaults)
   if (is.null(model_config$population_file)) {
     stop("model_config$population_file is required! Specify the population data file.")
@@ -100,29 +100,33 @@ setup_comp <- function(ncomps, results_dir, model_config) {
     )
   }
 
-  # Compute true population means (theta_true) - ONCE for entire study
-  # Apply same response variable computation and filter as in sampling
-  acs_pop_for_truth <- create_response_variable(acs_pop, response_var)
+  # Compute and save theta_true if not already present
+  if (!file.exists(file.path(base_folder, "theta_true.RDS"))) {
+    # Compute true population means (theta_true) - ONCE for entire study
+    # Apply same response variable computation and filter as in sampling
+    acs_pop_for_truth <- create_response_variable(acs_pop, response_var)
 
-  # Apply response filter if specified
-  if (!is.null(response_filter) && response_filter != "") {
-    acs_pop_for_truth <- acs_pop_for_truth %>% filter(eval(parse(text = response_filter)))
+    # Apply response filter if specified
+    if (!is.null(response_filter) && response_filter != "") {
+      acs_pop_for_truth <- acs_pop_for_truth %>% filter(eval(parse(text = response_filter)))
+    }
+
+    # Compute true population means by PUMA
+    theta_true_df <- acs_pop_for_truth %>%
+      group_by(PUMA) %>%
+      summarise(theta_true = mean(.data[[response_var]], na.rm = TRUE), .groups = "drop") %>%
+      arrange(PUMA)
+
+    # Save theta_true to results directory (once, not per comparison)
+    saveRDS(
+      list(puma = theta_true_df$PUMA, values = theta_true_df$theta_true),
+      file.path(base_folder, "theta_true.RDS")
+    )
   }
 
-  # Compute true population means by PUMA
-  theta_true_df <- acs_pop_for_truth %>%
-    group_by(PUMA) %>%
-    summarise(theta_true = mean(.data[[response_var]], na.rm = TRUE), .groups = "drop") %>%
-    arrange(PUMA)
-
-  # Save theta_true to results directory (once, not per comparison)
-  saveRDS(
-    list(puma = theta_true_df$PUMA, values = theta_true_df$theta_true),
-    file.path(base_folder, "theta_true.RDS")
-  )
-
   # main loop - each comparison has unique z & d via sampling
-  for (sim in 1:ncomps) {
+  indices <- if (!is.null(comp_nos)) comp_nos else start_from:ncomps
+  for (sim in indices) {
     # create simulation folder
     sim_folder <- file.path(base_folder, sprintf("comparison_%03d", sim))
     dir.create(sim_folder, showWarnings = FALSE)
@@ -134,7 +138,7 @@ setup_comp <- function(ncomps, results_dir, model_config) {
     dir.create(file.path(sim_folder, "fit_on_z"), showWarnings = FALSE)
 
     # Draw sample
-    set.seed(sim)
+    set.seed(sim + seed_offset)
     sample <- get_strat_PS(
       pop_df = acs_pop,
       samp_frac = samp_frac,
@@ -384,8 +388,9 @@ esim_helper <- function(comp_no, niters, results_dir) {
 }
 
 # iterates over each comparison
-setup_esim <- function(ncomps, results_dir, niters = 100) {
-  lapply(1:ncomps, function(k) {
+setup_esim <- function(ncomps, results_dir, niters = 100, start_from = 1, comp_nos = NULL) {
+  indices <- if (!is.null(comp_nos)) comp_nos else start_from:ncomps
+  lapply(indices, function(k) {
     esim_helper(comp_no = k, niters = niters, results_dir = results_dir)
   })
   return("Setup complete!")
