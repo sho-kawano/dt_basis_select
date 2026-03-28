@@ -1,558 +1,195 @@
-# Design-based Comparison Study For Data Thinning 
+# Data Thinning for Model Validation in Small Area Estimation
 
-This is a repo for a research project I am conducting on data thinning for model selection. For the full background, see `_for_claude/background.tex`.
+Research project applying data thinning to model selection for Fay-Herriot models. See `_for_claude/draft_2026-03-26.tex` for the paper and `_for_claude/PIPELINE_REFERENCE.md` for pipeline details.
+
+**Status:** Full draft complete. All empirical work done (ESIM backfill, aggregation, notebook, paper text updated).
+
+**Paper narrative (Section 6.3):** DT is the most *stable* method — consistent conservative bias across all designs, no sign-flip. WAIC wins at 0.75%, DIC wins at 1.25%, ESIM wins at 1.75%. DT stays consistently negative bias — never over-selects. Do NOT frame as "DT wins overall." Do NOT crown an overall winner.
+
+**START HERE for new sessions:** Read paper Sections 2.3 and 6 in `_for_claude/draft_2026-03-26.tex`.
 
 ## Coding Context
-I am working on this repo by myself. I would prioritize brevity / clarity and less on production-level software engineering concerns like error-catching.  Informative & concise comments would be appreciated (but avoid verbose comments).
 
-Please be extra careful for making changes that involve nuanced statistical reasoning, evaluating results, etc. If you're unsure, just ask me (I don't mind). Ex: if you're unsure about what goes where in a model call please take a conservative approach.
+Solo project. Prioritize brevity/clarity over production-style error handling. Be extra careful with statistical reasoning -- ask if unsure.
 
-**When drawing conclusions from data analysis:**
-- Be skeptical and understated in claims
-- Avoid overstatement or exaggeration of results
-- Verify quantitative claims carefully before stating them
-- Prefer conservative interpretations over bold claims
+**Data analysis:** Be skeptical, avoid overstatement, verify quantitative claims, prefer conservative interpretations.
 
-For tasks that are mostly software-enginnering based, I fully trust your judgement.
+**For parallel processing:** ALWAYS use FORK clusters (`type = "FORK"`).
 
-**For data analysis tasks:** See `_for_claude/efficient_data_analysis.md` for workflow best practices.
-
-**For parallel processing:** ALWAYS use FORK clusters (`type = "FORK"`). FORK clusters share memory with the parent process and do not require `.export` for variable access. Example:
+**Floating point comparisons:** Always use tolerance with epsilon values:
 ```r
-cl <- makeCluster(n_cores, type = "FORK")
-registerDoParallel(cl)
-foreach(i = 1:n) %dopar% {
-  my_function(i, my_var)  # my_var accessible without .export
-}
-stopCluster(cl)
+filter(abs(epsilon - 0.6) < 0.001)  # NOT: filter(epsilon == 0.6)
 ```
 
-## ⚠️ CRITICAL RULE: NEVER DELETE RESULTS DIRECTORIES
-
-**NEVER use `unlink()`, `rm -rf`, or any method to delete existing `_results_*` directories.**
-
-Results directories contain valuable computational results that take hours to generate. If you need to create a new results directory:
-- ALWAYS create a new, uniquely named directory (e.g., `_results_equal75_v2`, `_results_test_YYYYMMDD`)
-- NEVER reuse existing directory names
-- ASK the user what directory name to use if uncertain
-- Check if a directory exists before proceeding
-
-This rule applies to ALL scripts, including test scripts and re-runs.
-
----
-
-## Project Analyses
-
-This repository contains multiple related analyses studying data thinning for model selection in small area estimation. All analyses use:
-- **Data:** California PUMS population (`data/ca_pums_population.rds`)
-- **Model:** Spatial basis function model with fixed basis (`spatial_basis_fit.R`)
-- **Response:** Employment-to-population ratio (`employed`)
-- **Evaluation:** Compare model selection methods against true population parameters
-
-### Analysis 1: 10-Config Comprehensive Comparison (PRIMARY)
-
-**Purpose:** Compare DT vs DIC/WAIC across diverse sampling designs
-
-**Scripts:**
-- `test_sampling_designs_10configs.R` - Generates all 10 sampling designs
-- `aggregate_all_10configs.R` - Aggregates results across configs
-- `analysis/10_config_comprehensive.Rmd` - Analysis report
-
-**Configuration:**
-- 10 sampling designs (4 equal allocation: n=40,50,75,100; 6 proportional PPS: 0.5%-2.0%)
-- 20 comparisons per config
-- DT: ε ∈ {0.3, 0.4, 0.5, 0.6, 0.7, 0.8}, n_reps ∈ {1, 5}, MSE loss only
-- Benchmarks: DIC, WAIC, OD-Oracle
-- Note: No k-fold DT in this analysis
-
-**Output:**
-- `results_multi_config/dt_all_10configs.RDS`
-- `results_multi_config/oracle_all_10configs.RDS`
-
-**Key Finding:** DT wins 70% of configs, especially in proportional allocation
-
----
-
-### Analysis 2: Full Comparisons (COMPUTATIONALLY INTENSIVE)
-
-**Purpose:** Deep comparison including ESIM with 50 comparisons
-
-**Configurations completed:**
-- `_results_ca_full_comparison_equal75/` - Equal allocation, n=75 (50 comparisons)
-- `_results_prop1p5pct_full_comparison/` - Proportional 1.5% (50 comparisons)
-
-**Methods:** DT (multiple ε), DIC, WAIC, ESIM (100 iterations)
-
-**Scripts:**
-- `run_prop1p5pct_full.R` (example production script)
-- `run_summary.R` (aggregation)
-
-⚠️ **NEVER DELETE THESE DIRECTORIES** - they take 25-50+ hours to generate
-
----
-
-### Analysis 3: Epsilon Sensitivity Analysis
-
-**Purpose:** Study optimal epsilon across sample sizes (equal allocation only)
-
-**Scripts:**
-- `aggregate_epsilon_8configs.R` - Aggregates 8 equal allocation configs
-- `analysis/epsilon_sensitivity.Rmd` - Analysis report
-
-**Configuration:**
-- 8 equal allocation configs (n=20,30,40,50,75,100,125,150)
-- DT: ε ∈ {0.1-0.9} (full grid), n_reps ∈ {1,3,5}
-- Loss functions: MSE + plugin_NLL
-
-**Output:**
-- `results_multi_config/dt_epsilon_8configs.RDS`
-- `results_multi_config/oracle_epsilon_8configs.RDS`
-
-**Shared directories:** Some directories used by both Analysis 1 and 3:
-- `_results_equal40_comparison/`
-- `_results_equal50_comparison/`
-- `_results_equal75_rerun/`
-- `_results_equal100_comparison/`
-
----
-
-### Analysis 4: Oracle Consistency Screening (EXPLORATORY)
-
-**Purpose:** Test different response variables for oracle properties
-
-**Location:** `oracle_consistency_analysis/`
-
-**Status:** Exploratory - identified `employed` as best response variable
-
----
-
-## Implementation Tasks
-
-### ✅ Completed - Core Infrastructure (Phases 1-4)
-
-All core infrastructure completed and documented in archived sections:
-- ✅ Data pipeline (sampling, function signatures, testing)
-- ✅ Spatial basis function model (Gibbs sampler, validation, convergence)
-- ✅ CA PUMA adjacency matrix (793 edges, rook contiguity)
-- ✅ nbasis selection analysis framework
-
-**Current Configuration:**
-- State: California (281 PUMAs)
-- Sampling: Equal allocation, n=75 per PUMA
-- Response: employed (employment-to-population ratio)
-- Model: Fixed spatial basis, weak priors (c=d=0.001)
-- MCMC: nburn=1500, ndesired=2000
-- nbasis grid: [3, 6, 9, ..., 60] (20 values)
-
----
-
----
-
-### ✅ BREAKTHROUGH: CA Employed Response (Nov 2025)
-
-**Status:** ✅ **PRODUCTION-READY CONFIGURATION IDENTIFIED**
-
-After discovering flat curves with PUBCOV, conducted systematic testing of alternative response variables and found **CA employed** (employment-to-population ratio) produces excellent oracle properties.
-
-**Critical Bug Found & Fixed (Nov 25, 2025):**
-- **Issue:** Oracle screening scripts used wrong config keys (`population_data`, `adjacency_data`)
-- Functions expected different keys (`population_file`, `adjacency_file`)
-- Silent fallback to CA data masked the error → Oracle screening labeled "ny_phase2_employed" actually used **CA data**
-- **Fix:** Removed all silent defaults, now requires explicit `population_file` and `adjacency_file` in all configs
-- **Files changed:** `sim_functions/sampling_and_setup.R`, `sim_functions/full_data_fit.R`, `sim_functions/run_dt.R`, `sim_functions/run_esim.R`
-
-**Systematic Audit Conducted:**
-1. **Oracle screening pipeline:** ✓ Structurally valid (setup_comp → full_data_fit → summary_oracle)
-2. **Plotting code:** ✓ Valid (correctly uses summary_oracle to read chains.RDS and theta_true.RDS)
-3. **Bug fixes:** ✓ Removed CA fallbacks, standardized config keys
-4. **Documentation:** Created `SYSTEMATIC_AUDIT_RESULTS.md`
-
-**Sample Size Comparison (CA Employed, 20 comparisons each):**
-
-| equal_n | Mean Opt | SD      | Range       | MSE Var   | Penalty ±6 | Assessment                      |
-| ------- | -------- | ------- | ----------- | --------- | ---------- | ------------------------------- |
-| 40      | 13.1     | 3.7     | [3,15]      | 47.1%     | 5.4%       | ⚠️ Range touches boundary        |
-| 50      | 14.2     | 2.7     | [6,18]      | 44.1%     | 6.8%       | ⚠️ Too close to boundary (6-3=3) |
-| **75**  | **16.4** | **2.7** | **[12,24]** | **31.5%** | **8.0%**   | ✅ **SELECTED**                  |
-| 100     | 18.9     | 8.3     | [15,51]     | 24.7%     | 8.7%       | ❌ SD too high                   |
-
-**Why equal_75 Selected:**
-1. **Low SD (2.7)** - Consistent optimal across comparisons
-2. **Safe range [12-24]** - Well away from lower boundary (nbasis=3), no boundary contamination
-3. **Deep trough** - 8% average penalty at ±6, asymmetric (10.6% left, 5.3% right) reflects realistic cost structure
-4. **Strong signal** - 31.5% total MSE variation, sufficient to differentiate methods
-5. **Interior optimum** - Clear U-shaped curve with minimum at nbasis~15-16
-
-**Final Production Configuration:**
-```r
-State: California (281 PUMAs)
-Response: employed (employment-to-population ratio)
-  - response_var = "employed"
-  - response_filter = NULL  # Includes children ages 0-15 in denominator
-  - Interpretation: Proportion of total population that is employed
-Sampling: Equal allocation, n=75 per PUMA
-Model: Fixed spatial basis (spatial_type="fixed")
-Priors: c=d=0.001 (weak priors for U-shaped curves)
-MCMC: nburn=1500, ndesired=2000
-nbasis grid: [3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60]
-Expected optimal: nbasis~15-16
+**Testing analysis notebooks:** Use `knitr::purl()` to extract code, not direct render:
+```bash
+Rscript -e "knitr::purl('notebook.Rmd', output='/tmp/test.R', quiet=TRUE); source('/tmp/test.R')"
 ```
 
-**Test Script:**
-- `test_ca_oracle_minimal.R` - Minimal oracle-only test (no excessive printing, easy to review)
-- Validates oracle properties before running full pipeline
----
+## CRITICAL RULE: NEVER DELETE RESULTS DIRECTORIES
 
-### ✅ Six-Dimensional Analysis Framework (Nov 29, 2025)
-
-**Status:** ✅ **COMPLETE** - Comprehensive analysis identifying when and how DT provides value
-
-Developed unified framework to compare methods across sampling designs using 6 key dimensions:
-
-**The Six Dimensions:**
-
-1. **Signal-to-Noise (CV):** sqrt(d) / |z| - direct estimate quality
-2. **Oracle Signal (MSE variation %):** How different models perform - higher = easier selection
-3. **Variance Heterogeneity (d_ratio):** max(d)/min(d) - affects benefit of DT averaging
-4. **Oracle Stability (oracle SD):** Variability of optimal nbasis across comparisons
-5. **Model Complexity Support (mean nbasis):** What complexity the data can support
-6. **Selection Task Difficulty:** oracle_SD / (MSE_var / 100) - **KEY PREDICTOR**
-
-**Complete Results (6 configs, 20 comparisons each):**
-
-| Config      | CV   | MSE_var | d_ratio | Oracle_SD | Mean_nbasis | Difficulty | DIC       | WAIC       | DT ε=0.5 n=1 | DT ε=0.5 n=5 | DT ε=0.7 n=5 |
-| ----------- | ---- | ------- | ------- | --------- | ----------- | ---------- | --------- | ---------- | ------------ | ------------ | ------------ |
-| equal_50    | 0.18 | 311     | 5.4     | 2.7       | 14.3        | **0.88**   | 6.9       | 6.45       | 7.95         | 7.65         | **6.15** ⭐   |
-| equal_75    | 0.15 | 255     | 5.0     | 2.7       | 16.4        | **1.04**   | **5.1** ⭐ | 6.60       | 10.05        | 7.80         | 7.05         |
-| equal_40    | 0.21 | 307     | 6.8     | 3.7       | 13.1        | **1.20**   | 5.7       | **5.55** ⭐ | 8.10         | 8.10         | 6.90         |
-| prop_0.5pct | 0.24 | 280     | 13.4    | 4.2       | 11.3        | **1.51**   | **7.5** ⭐ | 7.95       | **6.45** ⭐   | 8.40         | 8.25         |
-| prop_1pct   | 0.17 | 293     | 6.5     | 4.6       | 14.7        | **1.56**   | **5.4** ⭐ | 7.05       | 7.95         | 6.90         | 7.20         |
-| prop_2pct   | 0.12 | 194     | 5.5     | 8.8       | 20.4        | **4.54**   | 9.3       | 11.4       | 10.20        | **7.65** ⭐   | 8.40         |
-
-**Summary Statistics (Mean MAD across configs):**
-
-| Method           | Mean MAD | Range    | Assessment                                       |
-| ---------------- | -------- | -------- | ------------------------------------------------ |
-| **DIC**          | **6.65** | 4.20     | Best mean performance                            |
-| **DT ε=0.7 n=5** | 7.32     | 2.25     | **Best balance** (competitive mean, very stable) |
-| WAIC             | 7.50     | 5.85     | Middle performance, least stable                 |
-| **DT ε=0.5 n=5** | 7.75     | **1.50** | **Most stable!**                                 |
-| DT ε=0.5 n=1     | 8.45     | 3.75     | Less stable without averaging                    |
-
-**Key Findings:**
-
-1. **Difficulty score strongly predicts ALL method performance:**
-   - cor(Difficulty, WAIC_MAD) = **0.950**
-   - cor(Difficulty, DT_MAD) = 0.874
-   - cor(Difficulty, DIC_MAD) = 0.804
-
-2. **The Precision Paradox:** Lower CV (better precision) → harder selection
-   - More data → flatter oracle curves → higher oracle instability
-   - prop_2pct: CV=0.12 (best precision), Difficulty=4.54 (hardest!)
-
-3. **DT provides stability insurance, not dominance:**
-   - **Easy regimes** (Difficulty < 2): DIC/WAIC win or tie (5/6 configs)
-   - **Hard regime** (Difficulty > 4): DT degrades less (7.65 vs 9.3/11.4)
-   - DT ε=0.5 n=5: Most stable (range 1.50) across ALL regimes
-   - DT ε=0.7 n=5: Best balance (mean 7.32, range 2.25)
-
-4. **Heterogeneity affects which DT config works:**
-   - **High heterogeneity** (prop_0.5pct, d_ratio=13.4): **n=1 wins** (averaging hurts)
-   - **Low heterogeneity** (others, d_ratio=5-7): **n=5 wins** (averaging helps)
-   - eps=0.3 consistently fails (excluded from analysis)
-
-5. **Winners by regime:**
-   - equal_50 (0.88): DT ε=0.7 n=5
-   - equal_75 (1.04): DIC
-   - equal_40 (1.20): WAIC
-   - prop_0.5pct (1.51): DIC (but DT ε=0.5 n=1 close: 6.45 vs 7.50)
-   - prop_1pct (1.56): DIC
-   - prop_2pct (4.54): DT ε=0.5 n=5 (clear win)
-
-**The Honest Story:**
-DT doesn't dominate but provides **robustness across difficulty regimes**. Pay ~0.7-1.1 MAD penalty on average for stability guarantee. In hard regimes where DIC/WAIC struggle, DT maintains performance.
-
-**Scripts:**
-- `analyze_six_dimensions.R` - Full six-dimensional analysis
-- `full_dimensions_table.R` - Complete results table
-- `diagnose_zd_structure.R` - z/d characteristic analysis
+**NEVER use `unlink()`, `rm -rf`, or any method to delete `_results_*` directories.** They take hours to generate. Always create new, uniquely named directories. Ask if uncertain.
 
 ---
 
-### ✅ 10-Config Comprehensive Analysis (Nov-Dec 2025)
+## Paper Structure (`_for_claude/draft_2026-02-22.tex`)
 
-**Status:** ✅ **COMPLETE** - Final comprehensive comparison across 10 sampling designs
+| Section | Title | Status |
+|---------|-------|--------|
+| 1 | Introduction | Written |
+| 2 | Background (FH model, Gaussian DT, Motivating Example) | Written |
+| 3 | MSE-Based Validation with Data Thinning | Written (theory + figures) |
+| 4 | Repeated Thinning | Written |
+| 5 | Likelihood-Based Validation | Written |
+| 6 | Empirical Analysis and Model Comparison | Written |
+| — | Discussion and Future Work | Written (last section, no number) |
 
-After the 6-config exploratory analysis, expanded to **10 sampling designs** (4 equal allocation + 6 proportional PPS) to provide comprehensive understanding of when DT provides value relative to DIC/WAIC.
+**No Section 7.** What was previously called Section 7 is now Section 6.3.
 
-**The 10 Configurations:**
+### Paper framing
+SAE -> DT. Solving a practical need in SAE, with generalizable insights about DT as secondary contribution.
 
-| Config           | Type  | Parameter | Mean n/PUMA | Comparisons |
-| ---------------- | ----- | --------- | ----------- | ----------- |
-| **equal_40**     | Equal | n=40      | 40          | 20          |
-| **equal_50**     | Equal | n=50      | 50          | 20          |
-| **equal_75**     | Equal | n=75      | 75          | 20          |
-| **equal_100**    | Equal | n=100     | 100         | 20          |
-| **prop_0.5pct**  | PPS   | 0.5%      | ~85         | 20          |
-| **prop_1pct**    | PPS   | 1.0%      | ~170        | 20          |
-| **prop_1p25pct** | PPS   | 1.25%     | ~212        | 20          |
-| **prop_1p5pct**  | PPS   | 1.5%      | ~255        | 20          |
-| **prop_1p75pct** | PPS   | 1.75%     | ~297        | 20          |
-| **prop_2pct**    | PPS   | 2.0%      | ~340        | 20          |
+### Section 6 structure
+- **6.1** Simulation Framework (shared setup for all empirical sections)
+- **6.2** Effect of epsilon and Repeats R — equal allocation designs, S=50, figures/plot4_basis.png
+- **6.3** Comparison with Existing Methods — PA designs, DT vs DIC/WAIC/ESIM, figures/plot5_comparison.png
 
-**Key Results:**
+### Key theoretical results (Section 3)
+- Thinning gap is monotonically decreasing in epsilon (Corollary on monotonicity)
+- Thinning gap is model-dependent: complex models have larger gaps
+- Fundamental tension: gap favors high epsilon, variance favors low epsilon
+- No single epsilon is optimal across candidate models
 
-**DT vs DIC Performance:**
-- **DT Wins:** 7/10 configs (70%)
-- **DIC Wins:** 3/10 configs (30%)
-- **Largest DT advantage:** prop_1p75pct & equal_100 (both win by **4.65 MAD**)
-- **Best overall performance:** prop_1p25pct (DT ε=0.7 n=5: **MAD=4.35**)
+### Ground truth / evaluation metrics (finalized)
+- **Oracle basis:** per-sample argmin_p sum_i (theta_hat_i^(p) - theta_i)^2
+- **MAE:** mean absolute error from oracle basis count (primary metric)
+- **Mean Bias:** mean signed deviation (under-selection = negative)
+- Candidate grid: p ∈ {3, 6, 9, ..., 60} (20 models)
 
-**Pattern Summary:**
-- **DT dominates** proportional allocation (6/6 prop configs)
-- **DIC excels** in mid-range equal allocation (equal_40, equal_75, prop_1pct)
-- **DT advantages larger in magnitude** (up to 4.65) than DIC advantages (max 1.50)
+### Recommendation (from Section 6.2)
+epsilon ≈ 0.6–0.7 with R ≥ 5 repeats. Paper uses epsilon=0.7 for method comparison.
 
-**Winner by Config:**
+### Section 6.3 results (S=50, seeds 1–50, new trio)
 
-| Config       | Winner       | MAD      | DT Gap        |
-| ------------ | ------------ | -------- | ------------- |
-| prop_1p75pct | DT ε=0.5 n=5 | 5.25     | **-4.65** ⭐⭐⭐ |
-| equal_100    | DT ε=0.6 n=5 | 6.00     | **-4.65** ⭐⭐⭐ |
-| prop_2pct    | DT ε=0.6 n=5 | 7.35     | -1.95         |
-| prop_0.5pct  | DT ε=0.5 n=1 | 6.45     | -1.05         |
-| equal_50     | DT ε=0.7 n=5 | 6.15     | -0.75         |
-| prop_1p5pct  | DT ε=0.5 n=5 | 5.55     | -0.75         |
-| prop_1p25pct | DT ε=0.7 n=5 | **4.35** | -0.60         |
-| equal_40     | WAIC         | 5.55     | +0.90         |
-| equal_75     | DIC          | 5.10     | +1.35         |
-| prop_1pct    | DIC          | 5.40     | +1.50         |
+| | 0.75% | 1.25% | 1.75% | Overall |
+|---|---|---|---|---|
+| DIC | 6.18 | **5.70** | 10.7 | 7.52 |
+| DT-MSE | 7.74 | 5.82 | 9.54 | 7.70 |
+| DT-NLL | 7.68 | 5.88 | 10.1 | 7.90 |
+| ESIM | 9.60 | 7.44 | **7.38** | 8.14 |
+| WAIC | **5.94** | 6.78 | 13.0 | 8.58 |
 
-**Final Conclusion:**
-DT provides substantial value in most sampling regimes, especially proportional allocation and high sample sizes. While not universally dominant, DT wins significantly more often (70%) and with larger magnitude (up to 4.65 vs max 1.50 for DIC). The "sweet spot" is **prop_1p25pct** where DT achieves the best performance across all configs.
+### Figure scripts
+- `analysis/section2_spatial_illustration.Rmd` -- Section 2 figure
+- `analysis/section3_figures.Rmd` -- Sections 3/4/5 gap/variance/tradeoff figures
+- `analysis/section4_analysis.Rmd` -- Section 4 variance ratio analysis
+- `analysis/section6_epsilon_analysis.Rmd` -- Section 6.2 epsilon/R analysis (uses equal alloc)
+- `analysis/section6_methods_comparison.Rmd` -- Section 6.3 method comparison (uses PA alloc)
+- `analysis/oracle_margin_analysis.R` -- Figure 3 (plot6_oracle_margin.png): oracle signal vs accuracy at 1.75% PA
+- `analysis/supplement_thinning_maps.Rmd` -- Supplement figure (thinning maps)
 
-**Files:**
-- `test_sampling_designs_10configs.R` - Main execution script (runs all 10 configs)
-- `aggregate_all_10configs.R` - Aggregates all 10 configs (ε ∈ {0.3-0.8}, n_reps ∈ {1, 5})
-- `visualize_epsilon_curves.R` - Creates epsilon sensitivity plots
-- `analysis/10_config_comprehensive.Rmd` - Analysis report with epsilon visualizations
-- `results_multi_config/dt_all_10configs.RDS` - All DT results
-- `results_multi_config/oracle_all_10configs.RDS` - All oracle/DIC/WAIC results
+---
 
-**Results Directories:**
+## Empirical Setup
+
+- **Population:** California PUMS, ~1.76M person records across 281 PUMAs (`data/ca_pums_population.rds`)
+- **Response:** Employment-to-population ratio (`employed`), binary indicator
+- **Adjacency:** `data/ca_puma_adjacency.RDA` (793 edges, rook contiguity)
+- **Model:** Intercept-only Fay-Herriot with Moran's I spatial basis functions (fixed basis, `spatial_type="fixed"`, `X_covariates = NULL`)
+- **Candidate models:** p ∈ {3, 6, 9, ..., 60} (20 models)
+- **Priors:** c=d=0.001 (weak)
+- **MCMC:** nburn=1500, ndesired=2000
+- **X:** Intercept + spatial basis functions (no auxiliary covariates)
+- **z, d:** Horvitz-Thompson direct estimates and design-based sampling variances via `survey::svymean()` (vary per sample)
+
+### Sampling mechanism (`sim_functions/sampling_and_setup.R`)
+
+Both equal and proportional allocation use the **same within-PUMA mechanism**: stratified Poisson PPS sampling with inclusion probabilities proportional to person weights (PWGTP), implemented via `sampling::UPpoisson()`. Design weights = 1/inclusion_prob.
+
+- **Equal allocation:** Target sample size fixed at n_i = n for all PUMAs. Realized sizes vary around target (e.g., ±25% for n=40) due to Poisson mechanism.
+- **Proportional (PPS) allocation:** Target n_i = max(floor(N_i × samp_frac), min_sample_size), so larger PUMAs get more samples.
+
+### Survey designs used in paper
+
+**Sections 2–6.2 (equal allocation, S=50):**
+equal_30, equal_40, equal_50, equal_75, equal_100, equal_125
+
+**Section 6.3 (PA allocation, S=50, new trio):**
+prop_0.75pct (~47 avg n), prop_1p25pct (~78 avg n), prop_1p75pct (~110 avg n)
+
+### Methods compared
+- **Data Thinning (DT):** Repeated single-set thinning, eps=0.7 R=5
+- **DIC / WAIC:** Information criteria benchmarks
+- **ESIM:** Empirical simulation (L=100 iterations)
+- **OD-Oracle:** Per-sample oracle using true population means (ground truth)
+
+---
+
+## Results & Data
+
+### Paper final data (`results_summary/`)
+- `equal_allocation_results.RDS` — S=50, 6 equal designs, DT + oracle + DIC/WAIC
+- `thinned_oracle_s50.RDS` — S=50, thinned oracle MSE for gap analysis
+- `methodcomp_results.RDS` — S=50, new trio (0.75%/1.25%/1.75%), DT + ESIM + oracle + DIC/WAIC
+- `is_oracle_equal_alloc.RDS` — IS-oracle results for equal allocation (exploratory, Paper 2)
+
+### Per-design results directories
 ```
-_results_equal40_comparison/
-_results_equal50_comparison/
-_results_equal75_rerun/
-_results_equal100_comparison/
-_results_prop0.5pct_comparison/
-_results_prop1pct_comparison/
-_results_prop1p25pct_comparison/
-_results_prop1p5pct_comparison/
-_results_prop1p75pct_comparison/
-_results_prop2pct_comparison/
+# Equal allocation (S=50) — Sections 2-6.2
+_results_equal30/    _results_equal40/    _results_equal50/
+_results_equal75/    _results_equal100/   _results_equal125/
+
+# PA designs — Section 6.3 trio (seeds 1-50)
+_results_prop0.75pct/    _results_prop1p25pct/    _results_prop1p75pct/
+
+# PA designs — kept for reference (not in trio)
+_results_prop1p5pct/    _results_prop2p25pct/
 ```
 
-**Note:** ESIM results not available for any configs (skipped during aggregation).
-
-**Additional Analysis:**
-
-**Epsilon Sensitivity Across Configs:**
-
-Optimal epsilon varies by config (n=5):
-- **ε=0.6:** equal_100, equal_50, equal_75, prop_2pct (4 configs)
-- **ε=0.7:** equal_40, prop_1p25pct, prop_1p5pct, prop_1pct (4 configs)
-- **ε=0.5:** prop_1p75pct (1 config)
-- **ε=0.3:** prop_0.5pct (1 config - only low-ε winner)
-
-Overall performance (mean across 10 configs):
-1. DT ε=0.7 n=5: 6.21% MSE penalty (best)
-2. DIC: 6.37%
-3. DT ε=0.6 n=5: 6.42%
-
-**Method Stability:** DT ε=0.6 n=5 and ε=0.7 n=5 show lowest range across configs (3.15-4.05), indicating robust performance across diverse sampling designs.
-
-**MAD vs Oracle Penalty:** High consistency between metrics (8/10 exact winner agreement, 10/10 same method family). Validates MAD as primary evaluation metric for method comparison.
-
-**Visualizations:**
-- `analysis/figure/epsilon_curves_mad.png` - MAD across epsilon values (n=5), faceted by config
-- `analysis/figure/epsilon_curves_pct_mse.png` - Oracle MSE penalty across epsilon (n=5), faceted by config
-
-Both plots show DT n=5 curves vs DIC/WAIC horizontal baselines, configs ordered by sample size.
+NEVER DELETE any of these.
 
 ---
 
-## Key Architecture Decisions
+## Key Findings (Section 6.3, S=50, new trio, eps=0.7 R=5)
 
-**No pre-aggregated data file:**
-- ❌ DO NOT create `create_puma_data.R` or `data/puma_aggregated.rds`
-- ✅ Each comparison samples individuals and aggregates on-the-fly
+- **Per-design winners:** WAIC at 0.75%, DIC at 1.25%, ESIM at 1.75%. No single method dominates.
+- **Stability:** DT-NLL stays consistently negative bias — never over-selects. DIC/WAIC bias shifts across designs.
+- **ESIM:** Bad at low n (9.60 at 0.75%), best at high n (7.38 at 1.75%) — opposite arc from info criteria.
+- **Oracle margin analysis:** At 1.75%, filtering to decisive oracle samples shows ESIM and DT improve dramatically while DIC/WAIC are flat — out-of-sample methods track the oracle signal, info criteria don't.
 
-**Predictor matrix X - Fixed vs. Estimated:**
-- **Current approach:** X computed from **true population** (Option 3)
-  - X calculated once from full `acs_pop`, same for all comparisons
-  - Aligns with SAE modeling assumption (X treated as known/fixed)
-  - Cleaner for studying model selection methods
-- **Alternative (for later):** X as direct estimates (Option 2)
-  - Could compute X from survey sample using `svyby()` like we do for z
-  - More conservative, both z and X vary across comparisons
-  - Can make configurable via `sim_config$X_approach`
-- **Response z:** Always survey-weighted direct estimates from sample (varies across comparisons)
+## Architecture
 
-**Function signatures changed:**
-- OLD: Functions took `all_data`, `all_covs`, `chosen_var` as parameters
-- NEW: Functions only take `comp_no` and `results_dir`, load X/z/d from comparison folders
+**Pipeline flow:** `setup_comp()` -> `full_data_fit()` -> `run_dt()` / `run_esim()` -> `summary_*()` functions
 
-**What gets saved per comparison:**
+**Run + aggregate scripts:**
+- `run_equal_allocation.R` + `aggregate_equal_allocation.R` → Sections 2–6.2
+- `run_methodcomp.R` + `aggregate_methodcomp.R` → Section 6.3
+
+**Per comparison folder:**
 ```
 comparison_XXX/
-├── X.RDS    # Predictors (13 vars) - currently from population, configurable
-├── z.RDS    # Direct estimates from survey sample
-├── d.RDS    # Design-based variances from survey sample
-└── ...
+  X.RDS, z.RDS, d.RDS     # Data
+  fit_on_z/chains.RDS      # Full-data model fits
+  dt_1fold/eps_*/           # DT results by epsilon
+  emp_sim/                  # ESIM iterations
 ```
 
-See `_for_claude/architecture_change_analysis.md` for complete details.
+**Core functions:**
+- `sim_functions/sampling_and_setup.R` -- Sample generation, setup, setup_esim
+- `sim_functions/full_data_fit.R` -- Fit models on full data
+- `sim_functions/run_dt.R` -- Data thinning
+- `sim_functions/run_esim.R` -- Empirical simulation
+- `sim_functions/summary_oracle.R` -- Oracle MSE, DIC, WAIC computation
+- `sim_functions/summary_dt.R` -- DT loss computation
+- `sim_functions/summary_esim.R` -- ESIM loss computation
+- `models/spatial_basis_fh.R` -- Spatial basis FH model (Gibbs sampler)
 
----
+**Analysis notebooks:**
+- `analysis/section2_spatial_illustration.Rmd` -- Section 2 figure
+- `analysis/section3_figures.Rmd` -- Section 3/4/5 gap/variance/tradeoff figures
+- `analysis/section4_analysis.Rmd` -- Section 4 variance ratio
+- `analysis/section6_epsilon_analysis.Rmd` -- Section 6.2 epsilon/R analysis (equal allocation)
+- `analysis/section6_methods_comparison.Rmd` -- Section 6.3 method comparison (PA allocation)
+- `analysis/oracle_margin_analysis.R` -- Figure plot6 oracle margin (1.75% PA)
 
-### ✅ Full Pipeline Test Results (Nov 25, 2025)
-
-**Status:** ✅ **COMPLETE** - Inline config approach validated, all methods tested
-
-**Test Configuration:**
-- Script: `test_ca_full_pipeline.R`
-- Configuration: Inline config (saved as `model_config.RDS`)
-- Response: CA employed (employment-to-population ratio)
-- Sampling: Equal allocation, n=75 per PUMA
-- Comparisons: 10
-- Runtime: ~51 minutes (10 cores)
-
-**Statistical Review Completed (Nov 25, 2025):**
-- ✅ Reviewed all DT/ESIM/summary functions for misspecification
-- ✅ **Bug fixed:** Predictive NLL variance formula in `summary_dt.R` (missing /eps² scaling)
-- ✅ Verified: Plugin NLL, MSE bias correction, data thinning splits all correct
-- ⚠️ **Note:** ESIM data fission formula (2z - w) increases noise - unclear if intentional, deferred
-
-**Method Performance Results (10 comparisons):**
-
-| Method             | Mean nbasis | SD  | Boundary % | Exact Match | Within ±3 | Ranking    |
-| ------------------ | ----------- | --- | ---------- | ----------- | --------- | ---------- |
-| **Oracle MSE**     | 16.5        | 2.9 | 0%         | -           | -         | Truth      |
-| **DIC**            | 15.3        | 6.4 | 10%        | **30%**     | **60%**   | 🥇 **Best** |
-| **WAIC**           | 15.3        | 6.2 | 10%        | **20%**     | **60%**   | 🥈 2nd      |
-| DT eps=0.5, 3 reps | 12.9        | 5.3 | 10%        | 20%         | **70%**   | 🥉 3rd      |
-| DT 5-fold          | 14.4        | 8.1 | 10%        | 10%         | 30%       | 5th        |
-| ESIM (50 iters)    | 8.4         | 5.3 | **30%**    | 30%         | 40%       | 4th        |
-
-**Key Findings:**
-
-1. **WAIC/DIC excel:** 🏆
-   - DIC: 30% exact agreement with oracle (best overall)
-   - WAIC: 20% exact, 60% within ±3
-   - Both correctly identify oracle mean (15.3 vs 16.5)
-   - Only 10% boundary selections (very stable)
-
-2. **DT shows systematic underestimation:**
-   - All DT configs select fewer basis functions than oracle optimal
-   - Best config (eps=0.5, 3 reps): 70% within ±3 but mean=12.9 vs oracle=16.5
-   - Lower epsilon worse (eps=0.3: mean=9.0, 40% boundary)
-
-3. **ESIM needs more iterations:**
-   - 30% boundary selections (nbasis=3) with only 50 iters
-   - When correct, exact match (30% rate)
-   - Standard 100 iterations recommended for production
-
-**Files:**
-- `test_ca_full_pipeline.R` - Main test script with inline config
-- `run_summary.R` - Summary script (reads `model_config.RDS`)
-- `_results_ca_test_pipeline/` - Test results (10 comparisons)
-
-**Workflow Established:**
-```bash
-./test_ca_full_pipeline.R              # Runs study, saves model_config.RDS
-Rscript run_summary.R <results_dir>    # Analyzes results
-```
-
----
-
-## Statistical Context
-
-This repo compares different model selection methods across **design-based synthetic datasets** that mimic real survey data.
-
-**Data Generation Approach:**
-- Population: Individual-level California PUMS data (`data/ca_pums_population.rds`)
-- Sampling: Stratified PPS (probability proportional to size) by PUMA
-- Per comparison: Draw independent sample → compute survey-weighted estimates
-- Predictors (X): Computed from full population (fixed across comparisons)
-- Response (z, d): Survey-weighted direct estimates and variances (vary across comparisons)
-
-**What is new:** Using data thinning for model selection in small area estimation context.
-
-**Methods compared:**
-- **Data Thinning (DT):** Single-fold with varying ε and n_reps; multi-fold (k=3, k=5)
-  - Loss functions: MSE (primary), plugin NLL (some analyses)
-  - Epsilon range: 0.1-0.9 (9 values)
-  - Repetitions: n_reps ∈ {1, 3, 5}
-- **DIC / WAIC:** Information criteria benchmarks
-- **ESIM:** Empirical simulation (100 iterations, full comparisons only)
-- **OD-Oracle:** Observed-data oracle using true population parameters (ground truth) 
-
-
-### Evaluation
-
-In this design-based simulation, we know the **true PUMA-level population means** from `ca_pums_population.rds`. This allows us to calculate several "Oracle" quantities:
-
-- **Finite Population Oracle (FP-Oracle):** Score across datasets (expectation over sampling distribution). Estimated empirically across comparisons.
-- **Observed-Data Oracle (OD-Oracle):** Computed knowing true population means. **Primary benchmark for this study.**
-- **Thinned-Data Oracle (TD-Oracle):** Scores for specific data thinnings knowing true means.
-
-**Primary metric: OD-Oracle MSE**
-- Fit models on observed data (X, z) for a comparison
-- Evaluate MSE against true population means
-- Represents best achievable performance for that dataset
-- Note: Some methods are likelihood-based; OD-Oracle for likelihood scores is less clear-cut 
-
-Some ways to benchmark using OD-Oracle MSE:
-
-1. Scatterplot of OD-Oracle MSE vs score from each method
-2. Selected model: which model would be chosen based on each method
-3. Ranking: did the ranking of the method agree with OD-Oracle based on Kendall's Tau or other similarity metrics?
-
----
-
-## Technical Notes
-
-### Working with results.RDS / results.csv
-
-**Important:** Always use tolerance for floating point comparisons with epsilon values:
-```r
-# WRONG (will find 0 rows):
-filter(epsilon == 0.6)
-
-# CORRECT:
-filter(abs(epsilon - 0.6) < 0.001)
-```
-
-**Data structure:**
-- `results.RDS` and `results.csv` contain the same data (different formats)
-- Located in `_results_*/` directories
-- Key columns: `comp_no`, `method`, `nbasis`, `metric`, `epsilon`, `n_reps_used`
-- DT 5-fold rows have `epsilon = NA` and `n_reps_used = NA`
-
-**Common analysis patterns:**
-```r
-# Get oracle selections per comparison
-oracle_selections <- results %>%
-  filter(method == "OD-Oracle MSE") %>%
-  group_by(comp_no) %>%
-  slice_min(metric, n = 1, with_ties = FALSE)
-
-# Get method selections with deviations
-deviations <- results %>%
-  filter(method != "OD-Oracle MSE") %>%
-  group_by(comp_no, method, epsilon, n_reps_used) %>%
-  slice_min(metric, n = 1, with_ties = FALSE) %>%
-  left_join(oracle_selections, by = "comp_no") %>%
-  mutate(deviation = selected_nbasis - oracle_nbasis)
-```
+See `_for_claude/PIPELINE_REFERENCE.md` for full pipeline documentation.
