@@ -39,12 +39,6 @@ oracle_selections <- oracle_all %>%
   slice_min(mse_true, n = 1, with_ties = FALSE) %>%
   select(config, comp_no, oracle_nbasis = nbasis, oracle_mse = mse_true)
 
-cat(sprintf("Loaded %d configs with %d total comparisons\n",
-            length(unique(dt_all$config)),
-            nrow(oracle_selections)))
-
-cat("\nConfigs:\n")
-print(sort(unique(dt_all$config)))
 ```
 
 ---
@@ -251,11 +245,11 @@ dic_oracle_penalty <- dic_selections %>%
   rename(dic_mse = mse_true) %>%
   left_join(oracle_selections, by = c("config", "comp_no")) %>%
   mutate(
-    pct_penalty = (dic_mse - oracle_mse) / oracle_mse * 100
+    oracle_penalty = (dic_mse - oracle_mse) / oracle_mse * 100
   ) %>%
   group_by(config) %>%
   summarise(
-    mean_pct_penalty = mean(pct_penalty),
+    mean_oracle_penalty = mean(oracle_penalty),
     method = "DIC",
     .groups = "drop"
   )
@@ -267,11 +261,11 @@ waic_oracle_penalty <- waic_selections %>%
   rename(waic_mse = mse_true) %>%
   left_join(oracle_selections, by = c("config", "comp_no")) %>%
   mutate(
-    pct_penalty = (waic_mse - oracle_mse) / oracle_mse * 100
+    oracle_penalty = (waic_mse - oracle_mse) / oracle_mse * 100
   ) %>%
   group_by(config) %>%
   summarise(
-    mean_pct_penalty = mean(pct_penalty),
+    mean_oracle_penalty = mean(oracle_penalty),
     method = "WAIC",
     .groups = "drop"
   )
@@ -284,11 +278,11 @@ dt_oracle_penalty <- dt_selections %>%
   rename(dt_mse = mse_true) %>%
   left_join(oracle_selections, by = c("config", "comp_no")) %>%
   mutate(
-    pct_penalty = (dt_mse - oracle_mse) / oracle_mse * 100
+    oracle_penalty = (dt_mse - oracle_mse) / oracle_mse * 100
   ) %>%
   group_by(config, epsilon, n_reps_used) %>%
   summarise(
-    mean_pct_penalty = mean(pct_penalty),
+    mean_oracle_penalty = mean(oracle_penalty),
     .groups = "drop"
   ) %>%
   mutate(method = sprintf("DT ε=%.1f n=%d", epsilon, n_reps_used))
@@ -297,7 +291,7 @@ dt_oracle_penalty <- dt_selections %>%
 all_oracle_penalties <- bind_rows(
   dic_oracle_penalty,
   waic_oracle_penalty,
-  dt_oracle_penalty %>% select(config, mean_pct_penalty, method)
+  dt_oracle_penalty %>% select(config, mean_oracle_penalty, method)
 )
 ```
 
@@ -313,8 +307,8 @@ best_by_mad <- all_mad %>%
 # Best by Oracle Penalty
 best_by_oracle_penalty <- all_oracle_penalties %>%
   group_by(config) %>%
-  slice_min(mean_pct_penalty, n = 1, with_ties = FALSE) %>%
-  select(config, winner_penalty = method, best_penalty = mean_pct_penalty)
+  slice_min(mean_oracle_penalty, n = 1, with_ties = FALSE) %>%
+  select(config, winner_penalty = method, best_penalty = mean_oracle_penalty)
 
 # Combine side-by-side (ordered by sample size)
 best_methods_combined <- best_by_mad %>%
@@ -325,80 +319,6 @@ best_methods_combined <- best_by_mad %>%
 
 best_methods_combined %>%
   kable(digits = 2, caption = "Winner by MAD vs Oracle MSE Penalty")
-```
-
----
-
-# DT vs DIC Gap Analysis
-
-## Visualization: DT vs DIC MAD Gap
-
-```{r gap_plot_mad, fig.height=7}
-# Find best DT MAD per config
-best_dt_mad <- dt_mad %>%
-  group_by(config) %>%
-  slice_min(MAD, n = 1, with_ties = FALSE) %>%
-  select(config, best_dt_method = method, best_dt_mad = MAD)
-
-# Join with DIC MAD
-gap_analysis_mad <- dic_mad %>%
-  rename(dic_mad = MAD) %>%
-  select(config, dic_mad) %>%
-  left_join(best_dt_mad, by = "config") %>%
-  mutate(
-    gap = best_dt_mad - dic_mad,
-    winner = ifelse(gap < 0, "DT", "DIC")
-  )
-
-gap_analysis_mad %>%
-  mutate(config = fct_reorder(config, gap)) %>%
-  ggplot(aes(x = config, y = gap, fill = winner)) +
-  geom_col() +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
-  coord_flip() +
-  scale_fill_manual(values = c("DT" = "steelblue", "DIC" = "coral")) +
-  labs(title = "Best DT vs DIC: MAD Gap",
-       subtitle = "Negative = DT wins, Positive = DIC wins",
-       x = "Config",
-       y = "MAD Gap (DT - DIC)",
-       fill = "Winner") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-```
-
-## Visualization: DT vs DIC Oracle Penalty Gap
-
-```{r gap_plot_oracle, fig.height=7}
-# Find best DT Oracle penalty per config
-best_dt_penalty <- dt_oracle_penalty %>%
-  group_by(config) %>%
-  slice_min(mean_pct_penalty, n = 1, with_ties = FALSE) %>%
-  select(config, best_dt_method = method, best_dt_penalty = mean_pct_penalty)
-
-# Join with DIC Oracle penalty
-gap_analysis_oracle <- dic_oracle_penalty %>%
-  rename(dic_penalty = mean_pct_penalty) %>%
-  select(config, dic_penalty) %>%
-  left_join(best_dt_penalty, by = "config") %>%
-  mutate(
-    gap = best_dt_penalty - dic_penalty,
-    winner = ifelse(gap < 0, "DT", "DIC")
-  )
-
-gap_analysis_oracle %>%
-  mutate(config = fct_reorder(config, gap)) %>%
-  ggplot(aes(x = config, y = gap, fill = winner)) +
-  geom_col() +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
-  coord_flip() +
-  scale_fill_manual(values = c("DT" = "steelblue", "DIC" = "coral")) +
-  labs(title = "Best DT vs DIC: Oracle MSE Penalty Gap",
-       subtitle = "Negative = DT wins, Positive = DIC wins",
-       x = "Config",
-       y = "Oracle Penalty Gap % (DT - DIC)",
-       fill = "Winner") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
 ```
 
 ---
@@ -486,23 +406,23 @@ dt_oracle_penalty_full <- dt_selections %>%
             by = c("config", "comp_no", "dt_nbasis" = "nbasis")) %>%
   rename(dt_mse = mse_true) %>%
   left_join(oracle_selections, by = c("config", "comp_no")) %>%
-  mutate(pct_increase = (dt_mse - oracle_mse) / oracle_mse * 100) %>%
+  mutate(oracle_penalty = (dt_mse - oracle_mse) / oracle_mse * 100) %>%
   group_by(config, epsilon, n_reps_used) %>%
   summarise(
-    mean_pct_increase = mean(pct_increase),
-    se_pct_increase = sd(pct_increase) / sqrt(n()),
+    mean_oracle_penalty = mean(oracle_penalty),
+    se_oracle_penalty = sd(oracle_penalty) / sqrt(n()),
     .groups = "drop"
   ) %>%
   mutate(method = "DT")
 
 # DIC penalties
 dic_oracle_penalty_full <- dic_oracle_penalty %>%
-  select(config, mean_pct_increase = mean_pct_penalty) %>%
+  select(config, mean_oracle_penalty) %>%
   mutate(method = "DIC", epsilon = NA, n_reps_used = NA)
 
 # WAIC penalties
 waic_oracle_penalty_full <- waic_oracle_penalty %>%
-  select(config, mean_pct_increase = mean_pct_penalty) %>%
+  select(config, mean_oracle_penalty) %>%
   mutate(method = "WAIC", epsilon = NA, n_reps_used = NA)
 
 # Combine all
@@ -516,14 +436,14 @@ all_penalties_plot <- bind_rows(
 all_penalties_plot %>%
   filter((method == "DT" & n_reps_used == 5) | method %in% c("DIC", "WAIC")) %>%
   mutate(config = factor(config, levels = config_levels)) %>%
-  ggplot(aes(x = epsilon, y = mean_pct_increase)) +
+  ggplot(aes(x = epsilon, y = mean_oracle_penalty)) +
   geom_hline(data = all_penalties_plot %>% filter(method == "DIC") %>%
                mutate(config = factor(config, levels = config_levels)),
-             aes(yintercept = mean_pct_increase, color = "DIC"),
+             aes(yintercept = mean_oracle_penalty, color = "DIC"),
              linetype = "dashed", linewidth = 0.8) +
   geom_hline(data = all_penalties_plot %>% filter(method == "WAIC") %>%
                mutate(config = factor(config, levels = config_levels)),
-             aes(yintercept = mean_pct_increase, color = "WAIC"),
+             aes(yintercept = mean_oracle_penalty, color = "WAIC"),
              linetype = "dashed", linewidth = 0.8) +
   geom_line(data = all_penalties_plot %>% filter(method == "DT", n_reps_used == 5) %>%
               mutate(config = factor(config, levels = config_levels)),
@@ -537,10 +457,10 @@ all_penalties_plot %>%
     breaks = c("DT n=5", "DIC", "WAIC")
   ) +
   labs(
-    title = "Method Performance: Percentage Increase in MSE from Oracle Model",
+    title = "Method Performance: Oracle MSE Penalty",
     subtitle = "DT with n=5 averaging (solid line) vs DIC/WAIC (dashed lines). Lower is better. Ordered by sample size.",
     x = "Epsilon (ε)",
-    y = "Percentage Increase in MSE (%)",
+    y = "Oracle MSE Penalty (%)",
     color = "Method"
   ) +
   theme_minimal() +
@@ -550,23 +470,24 @@ all_penalties_plot %>%
   )
 ```
 
-## Best Epsilon Per Config
+
+## Best Epsilon Per Sampling Design
 
 ```{r best_epsilon}
 best_epsilon_table <- all_penalties_plot %>%
   filter(method == "DT", n_reps_used == 5) %>%
   group_by(config) %>%
-  slice_min(mean_pct_increase, n = 1, with_ties = FALSE) %>%
+  slice_min(mean_oracle_penalty, n = 1, with_ties = FALSE) %>%
   ungroup() %>%
   left_join(all_sample_sizes %>% select(config, mean_n), by = "config") %>%
   arrange(mean_n) %>%
-  select(config, best_epsilon = epsilon, pct_increase = mean_pct_increase) %>%
+  select(config, best_epsilon = epsilon, DT_penalty = mean_oracle_penalty) %>%
   left_join(
-    dic_oracle_penalty_full %>% select(config, DIC_pct = mean_pct_increase),
+    dic_oracle_penalty_full %>% select(config, DIC_penalty = mean_oracle_penalty),
     by = "config"
   ) %>%
   mutate(
-    dt_vs_dic = pct_increase - DIC_pct,
+    dt_vs_dic = DT_penalty - DIC_penalty,
     winner = ifelse(dt_vs_dic < 0, "DT", "DIC")
   )
 
@@ -575,29 +496,27 @@ best_epsilon_table %>%
         caption = "Best epsilon (n=5) per config with comparison to DIC. Negative dt_vs_dic = DT wins.")
 ```
 
-## Mean Performance Across Configs
+## Mean Performance Across Sampling Designs 
 
 ```{r epsilon_summary}
 epsilon_summary <- all_penalties_plot %>%
   filter((method == "DT" & n_reps_used == 5) | method == "DIC") %>%
   group_by(method, epsilon) %>%
   summarise(
-    mean_pct = mean(mean_pct_increase),
-    sd_pct = sd(mean_pct_increase),
+    mean_penalty = mean(mean_oracle_penalty),
+    sd_penalty = sd(mean_oracle_penalty),
     .groups = "drop"
   ) %>%
-  arrange(mean_pct)
+  arrange(mean_penalty)
 
 epsilon_summary %>%
   kable(digits = 2,
-        caption = "Mean percentage increase in MSE across 10 configs")
+        caption = "Mean oracle MSE penalty (%) across 10 configs")
 ```
 
 ---
 
-# Competitive Landscape
-
-## Method Rankings: Detailed
+# Method Rankings by Sampling Design  (Details)
 
 ```{r method_rankings, results='asis'}
 # Order configs by sample size
@@ -621,9 +540,9 @@ for (cfg in config_order) {
   cat("**By Oracle MSE Penalty:**\n\n")
   rankings_penalty <- all_oracle_penalties %>%
     filter(config == cfg) %>%
-    arrange(mean_pct_penalty) %>%
+    arrange(mean_oracle_penalty) %>%
     mutate(rank = 1:n()) %>%
-    select(rank, method, penalty = mean_pct_penalty)
+    select(rank, method, oracle_penalty = mean_oracle_penalty)
 
   print(kable(rankings_penalty, digits = 2))
   cat("\n\n")
@@ -631,10 +550,4 @@ for (cfg in config_order) {
 ```
 
 
----
 
-# Session Info
-
-```{r session}
-sessionInfo()
-```
