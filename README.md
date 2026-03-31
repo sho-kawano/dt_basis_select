@@ -12,9 +12,9 @@ PPS sampling (`sim_functions/sampling_and_setup.R`) and fit candidate
 Fay-Herriot models with p ∈ {3, 6, …, 60} Moran's I spatial basis functions
 via Gibbs sampling (`models/spatial_basis_fh.R`).
 
-Two sampling designs are considered: equal allocation (E[n_i] ∈ {30, 50, 75,
-100}) for tuning thinning parameters, and proportional-to-population allocation
-(0.75%, 1.25%, 1.75% sampling rates) for method comparison. Horvitz-Thompson
+Two sampling designs are considered: equal allocation (target n_i per area: 30,
+50, 75, 100) for tuning thinning parameters, and proportional-to-population
+allocation (0.75%, 1.25%, 1.75% sampling rates) for method comparison. Horvitz-Thompson
 direct estimates and design-based variance estimates are computed via
 `survey::svymean()`.
 
