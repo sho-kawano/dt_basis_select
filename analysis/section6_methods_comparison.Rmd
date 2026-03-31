@@ -1,0 +1,412 @@
+---
+title: "Section 6.3: Methods Comparison on Proportional Allocation Designs"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 6)
+library(tidyverse)
+library(knitr)
+library(xtable)
+```
+
+# Overview
+
+Comparison of model selection methods on **proportional allocation (PA) designs**:
+
+- **Designs:** 0.75%, 1.25%, 1.75% sampling rates
+- **Methods:** DT-MSE, DT-Likelihood (ε = 0.7, R=5), DIC, WAIC, ESIM
+- **Models:** p ∈ {3, 6, 9, ..., 60} spatial basis functions (20 candidate models)
+- **Samples:** S = 50 per design
+
+---
+
+# Data Loading
+
+```{r load_data}
+results <- readRDS("../results_summary/methodcomp_results.RDS")
+
+oracle_all <- results$oracle  # comp_no, model, nbasis, mse_true, WAIC, DIC, config
+dt_all     <- results$dt      # comp_no, method, model, metric, loss_function, nbasis, epsilon, n_reps_used, config
+esim_all   <- results$esim    # comp_no, method, model, metric, nbasis, config
+
+# Oracle selections (argmin mse_true per comparison)
+oracle_selections <- oracle_all %>%
+  filter(!is.na(mse_true)) %>%
+  group_by(config, comp_no) %>%
+  slice_min(mse_true, n = 1, with_ties = FALSE) %>%
+  select(config, comp_no, oracle_nbasis = nbasis) %>%
+  ungroup()
+
+# DIC / WAIC selections
+ic_selections <- oracle_all %>%
+  pivot_longer(cols = c(DIC, WAIC), names_to = "method_label", values_to = "ic_val") %>%
+  filter(!is.na(ic_val)) %>%
+  group_by(config, comp_no, method_label) %>%
+  slice_min(ic_val, n = 1, with_ties = FALSE) %>%
+  select(config, comp_no, method_label, selected_nbasis = nbasis) %>%
+  mutate(method_type = method_label, epsilon = NA_real_) %>%
+  ungroup()
+
+# DT selections (R=5 only, epsilon = 0.7)
+dt_selections <- dt_all %>%
+  filter(n_reps_used == 5,
+         abs(epsilon - 0.7) < 0.001) %>%
+  mutate(
+    method_type = case_when(
+      str_detect(method, "MSE") ~ "DT-MSE",
+      str_detect(method, "plugin_NLL") ~ "DT-NLL"
+    ),
+    method_label = sprintf("%s \u03b5=%.1f", method_type, epsilon)
+  ) %>%
+  group_by(config, comp_no, method_label, method_type, epsilon) %>%
+  slice_min(metric, n = 1, with_ties = FALSE) %>%
+  select(config, comp_no, method_label, method_type, epsilon, selected_nbasis = nbasis) %>%
+  ungroup()
+
+# ESIM selections (standard validation only)
+esim_selections <- esim_all %>%
+  filter(method == "ESIM_standard", metric_type == "MSE", !is.na(nbasis)) %>%
+  group_by(config, comp_no) %>%
+  slice_min(metric, n = 1, with_ties = FALSE) %>%
+  select(config, comp_no, selected_nbasis = nbasis) %>%
+  mutate(method_label = "ESIM", method_type = "ESIM", epsilon = NA_real_) %>%
+  ungroup()
+
+# Combine and compute deviations
+deviations_all <- bind_rows(dt_selections, ic_selections, esim_selections) %>%
+  left_join(oracle_selections, by = c("config", "comp_no")) %>%
+  mutate(
+    deviation = selected_nbasis - oracle_nbasis,
+    abs_deviation = abs(deviation)
+  )
+
+cat("Loaded data:\n")
+cat(sprintf("  - Oracle selections: %d samples × %d designs = %d\n",
+            n_distinct(oracle_selections$comp_no),
+            n_distinct(oracle_selections$config),
+            nrow(oracle_selections)))
+cat(sprintf("  - Deviations: %d rows\n", nrow(deviations_all)))
+cat(sprintf("  - Methods: %s\n", paste(sort(unique(deviations_all$method_label)), collapse = ", ")))
+```
+
+---
+
+# Oracle Basis Statistics
+
+```{r oracle_stats}
+# Oracle basis statistics by design
+oracle_stats <- oracle_selections %>%
+  group_by(config) %>%
+  summarise(
+    n_samples = n(),
+    mean_oracle = mean(oracle_nbasis),
+    sd_oracle = sd(oracle_nbasis),
+    min_oracle = min(oracle_nbasis),
+    max_oracle = max(oracle_nbasis),
+    range_oracle = max(oracle_nbasis) - min(oracle_nbasis)
+  ) %>%
+  mutate(
+    config_label = case_when(
+      config == "prop_0.75pct" ~ "0.75% PA",
+      config == "prop_1p25pct" ~ "1.25% PA",
+      config == "prop_1p75pct" ~ "1.75% PA"
+    )
+  ) %>%
+  select(config_label, mean_oracle, sd_oracle, min_oracle, max_oracle, range_oracle)
+
+oracle_stats %>%
+  kable(digits = 1,
+        col.names = c("Design", "Mean", "SD", "Min", "Max", "Range"),
+        caption = "Oracle basis function counts by design (across 50 samples)")
+
+# Print oracle basis statistics
+cat("\n\nOracle basis function statistics (S=50):\n")
+print(oracle_stats)
+```
+
+---
+
+# Output 1: MAE and Bias Comparison Table
+
+```{r comparison_table}
+# Filter to methods for table
+table_methods <- c(
+  "DT-MSE ε=0.7",
+  "DT-NLL ε=0.7",
+  "DIC",
+  "WAIC",
+  "ESIM"
+)
+
+config_order <- c("prop_0.75pct", "prop_1p25pct", "prop_1p75pct")
+config_pct   <- c("0.75", "1.25", "1.75")
+
+# Compute MAE and bias by method and design
+comp_stats <- deviations_all %>%
+  filter(method_label %in% table_methods) %>%
+  group_by(method_label, config) %>%
+  summarise(MAE = mean(abs_deviation), bias = mean(deviation), .groups = "drop")
+
+# Fixed order: DT-first, then info criteria, then ESIM
+method_order <- c("DT-MSE \u03b5=0.7", "DT-NLL \u03b5=0.7", "DIC", "WAIC", "ESIM")
+
+# Display HTML version
+comp_stats %>%
+  mutate(cell = sprintf("MAE=%.2f, bias=%+.1f", MAE, bias)) %>%
+  select(method_label, config, cell) %>%
+  pivot_wider(names_from = config, values_from = cell) %>%
+  kable(caption = "MAE and bias from oracle basis count (S=50)")
+
+# Build LaTeX table manually (xtable can't do multi-column headers with cmidrule)
+format_bias <- function(b) {
+  s <- sprintf("%.1f", abs(b))
+  if (b >= 0) paste0("$+$", s) else paste0("$-$", s)
+}
+
+latex_lines <- c(
+  "\\begin{table}[ht]",
+  "\\centering",
+  "\\begin{tabular}{l rrr rrr}",
+  "  \\toprule",
+  "  & \\multicolumn{3}{c}{MAE} & \\multicolumn{3}{c}{Bias} \\\\",
+  "  \\cmidrule(lr){2-4} \\cmidrule(lr){5-7}",
+  sprintf("  Method & %s \\\\",
+          paste(sprintf("%s\\%%", config_pct), collapse = " & ") %>%
+          { paste0(., " & ", paste(sprintf("%s\\%%", config_pct), collapse = " & ")) })
+)
+latex_lines <- c(latex_lines, "  \\midrule")
+
+for (m in method_order) {
+  m_latex <- str_replace(m, "ε", "$\\\\epsilon$")
+  row_data <- comp_stats %>% filter(method_label == m)
+
+  mae_cells <- sapply(config_order, function(cfg) {
+    val <- row_data %>% filter(config == cfg) %>% pull(MAE)
+    sprintf("%.2f", val)
+  })
+
+  bias_cells <- sapply(config_order, function(cfg) {
+    val <- row_data %>% filter(config == cfg) %>% pull(bias)
+    format_bias(val)
+  })
+
+  latex_lines <- c(latex_lines,
+    sprintf("  %s & %s & %s \\\\", m_latex,
+            paste(mae_cells, collapse = " & "),
+            paste(bias_cells, collapse = " & ")))
+}
+
+latex_lines <- c(latex_lines,
+  "  \\bottomrule",
+  "\\end{tabular}",
+  sprintf("\\caption{MAE and mean bias from oracle basis count by method and design across $S=50$ simulation replicates. Columns indicate proportional-to-population allocation (PA) designs with overall sampling rates of %s. Negative bias indicates under-selection; positive indicates over-selection.}",
+          paste(sprintf("%s\\%%", config_pct), collapse = ", ")),
+  "\\label{tab:comparison}",
+  "\\end{table}")
+
+writeLines(latex_lines, "table_comparison.tex")
+cat("\nGenerated LaTeX:\n")
+cat(paste(latex_lines, collapse = "\n"))
+```
+
+---
+
+# Output 2: Boxplot of Deviations
+
+```{r deviation_boxplot, fig.width=10, fig.height=4}
+# Filter to keep only ε=0.7 for DT methods
+deviations_plot <- deviations_all %>%
+  filter(is.na(epsilon) | abs(epsilon - 0.7) < 0.001) %>%
+  mutate(
+    config_label = case_when(
+      config == "prop_0.75pct" ~ "0.75% PA",
+      config == "prop_1p25pct" ~ "1.25% PA",
+      config == "prop_1p75pct" ~ "1.75% PA"
+    ),
+    # Set factor order for x-axis
+    method_label = factor(method_label, levels = c(
+      "DT-MSE \u03b5=0.7",
+      "DT-NLL \u03b5=0.7",
+      "DIC",
+      "WAIC",
+      "ESIM"
+    )),
+    # Categorize as DT vs non-DT
+    method_category = ifelse(method_type %in% c("DT-MSE", "DT-NLL"), "DT", "Non-DT")
+  )
+
+# Create boxplot
+p <- ggplot(deviations_plot, aes(x = method_label, y = deviation, fill = method_category)) +
+  geom_boxplot(alpha = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  facet_wrap(~config_label, ncol = 3) +
+  labs(
+    x = "Method",
+    y = "Deviation from oracle basis"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+    axis.text.y = element_text(size = 11),
+    axis.title = element_text(size = 12),
+    strip.text = element_text(size = 12),
+    panel.grid.minor = element_blank(),
+    legend.position = "none"
+  ) +
+  scale_fill_manual(values = c("DT" = "lightblue", "Non-DT" = "lightgray"))
+
+# Save plot
+ggsave("plot5_comparison.png", p, width = 10, height = 4, dpi = 300)
+```
+
+---
+
+# Output 3: Responsiveness to Oracle Signal (1.75% PA)
+
+```{r responsiveness_table}
+# Compute oracle margins per sample (gap between best and 2nd-best model MSE)
+oracle_margins <- oracle_all %>%
+  filter(!is.na(mse_true)) %>%
+  group_by(config, comp_no) %>%
+  arrange(mse_true) %>%
+  summarise(
+    margin_1v2 = mse_true[2] - mse_true[1],
+    .groups = "drop"
+  )
+
+# Focus on 1.75% PA
+margins_175 <- oracle_margins %>% filter(config == "prop_1p75pct")
+median_margin <- median(margins_175$margin_1v2)
+
+# Identify clear-signal samples (above median margin)
+clear_signal_comps <- margins_175 %>%
+  filter(margin_1v2 >= median_margin) %>%
+  pull(comp_no)
+
+n_all   <- n_distinct(margins_175$comp_no)
+n_clear <- length(clear_signal_comps)
+
+# Deviations for 1.75% only
+dev_175 <- deviations_all %>%
+  filter(config == "prop_1p75pct", method_label %in% table_methods)
+
+# MAE for all samples
+mae_all <- dev_175 %>%
+  group_by(method_label) %>%
+  summarise(MAE_all = mean(abs_deviation), .groups = "drop")
+
+# MAE for clear-signal samples
+mae_clear <- dev_175 %>%
+  filter(comp_no %in% clear_signal_comps) %>%
+  group_by(method_label) %>%
+  summarise(MAE_clear = mean(abs_deviation), .groups = "drop")
+
+# Combine and compute change
+responsiveness <- mae_all %>%
+  left_join(mae_clear, by = "method_label") %>%
+  mutate(pct_change = (MAE_clear - MAE_all) / MAE_all * 100) %>%
+  arrange(MAE_all)
+
+# Display HTML version
+responsiveness %>%
+  mutate(change_str = sprintf("%+.0f%%", round(pct_change))) %>%
+  select(method_label, MAE_all, MAE_clear, change_str) %>%
+  kable(digits = 2, col.names = c("Method", "All (S=50)", "Clear Signal (S=25)", "Change"),
+        caption = sprintf("Responsiveness to oracle signal at 1.75%% PA (median margin = %.2e)", median_margin))
+
+# Replaced by scatter plot (Output 4) -- table_responsiveness.tex no longer needed
+# format_change <- function(pct) {
+#   if (pct >= 0) sprintf("$+$%.0f\\%%", round(abs(pct)))
+#   else sprintf("$-$%.0f\\%%", round(abs(pct)))
+# }
+#
+# resp_lines <- c(
+#   "\\begin{table}[ht]",
+#   "\\centering",
+#   "\\begin{tabular}{lrrr}",
+#   "  \\toprule",
+#   sprintf("  Method & All ($S$=%d) & Clear Signal ($S$=%d) & Change \\\\", n_all, n_clear),
+#   "  \\midrule"
+# )
+#
+# for (i in 1:nrow(responsiveness)) {
+#   r <- responsiveness[i, ]
+#   m_latex <- str_replace(r$method_label, "ε", "$\\\\epsilon$")
+#   resp_lines <- c(resp_lines,
+#     sprintf("  %s & %.2f & %.2f & %s \\\\",
+#             m_latex, r$MAE_all, r$MAE_clear, format_change(r$pct_change)))
+# }
+#
+# resp_lines <- c(resp_lines,
+#   "  \\bottomrule",
+#   "\\end{tabular}",
+#   sprintf("\\caption{...}", n_clear, n_all),
+#   "\\label{tab:responsiveness}",
+#   "\\end{table}")
+#
+# writeLines(resp_lines, "table_responsiveness.tex")
+```
+
+---
+
+# Output 4: Oracle Margin Scatter Plot (1.75% PA)
+
+```{r oracle_margin_scatter, fig.width=12, fig.height=4}
+# Build per-sample scatter data: x = oracle margin, y = abs deviation
+scatter_dat <- deviations_all %>%
+  filter(
+    config == "prop_1p75pct",
+    method_label %in% table_methods,
+    is.na(epsilon) | abs(epsilon - 0.7) < 0.001
+  ) %>%
+  left_join(
+    oracle_margins %>% filter(config == "prop_1p75pct"),
+    by = c("config", "comp_no")
+  ) %>%
+  mutate(
+    method_clean = case_when(
+      method_label == "DT-MSE \u03b5=0.7" ~ "DT-MSE",
+      method_label == "DT-NLL \u03b5=0.7" ~ "DT-NLL",
+      TRUE ~ method_label
+    ),
+    method_clean = factor(method_clean, levels = c("DT-MSE", "DT-NLL", "DIC", "WAIC", "ESIM")),
+    margin_scaled = margin_1v2 * 1e5
+  )
+
+p_scatter <- ggplot(scatter_dat, aes(x = margin_scaled, y = abs_deviation)) +
+  geom_point(alpha = 0.45, size = 1.8, color = "gray35") +
+  geom_smooth(method = "loess", se = FALSE,
+              color = "steelblue4", linewidth = 0.9) +
+  facet_wrap(~method_clean, nrow = 1) +
+  labs(
+    x = expression("Oracle margin (" %*% 10^{-5} * "), MSE gap: best vs. 2nd-best model"),
+    y = "Absolute deviation from oracle"
+  ) +
+  scale_y_continuous(breaks = seq(0, 60, by = 9)) +
+  theme_bw() +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    strip.background = element_rect(fill = "gray95"),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 11),
+    panel.grid.minor = element_blank()
+  )
+
+print(p_scatter)
+ggsave("plot6_oracle_margin.png", p_scatter, width = 12, height = 4, dpi = 300)
+```
+
+---
+
+# Session Info
+
+```{r session_info}
+sessionInfo()
+```
