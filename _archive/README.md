@@ -1,32 +1,61 @@
-# Archive Directory
+# Documentation for Claude
 
-Historical artifacts from data thinning study development (Nov 2025).
+This folder contains background information and analysis documentation for the project.
 
-## Contents
+## Active Documents
 
-### exploratory_scripts/
-Scripts used during analysis development phase:
-- test_sampling_designs.R - Old 5-config version (superseded by test_sampling_designs_10configs.R)
-- test_difficulty_gradient.R - Fine-grid tests (superseded by 10-config analysis)
-- analyze_by_cv.R - CV vs. performance analysis
-- analyze_prop_fine_grid.R - Fine-grid proportional analysis
-- rerun_equal75.R - Equal_75 re-run script
-- diagnose_prop2pct_failure.R - Debugging script for prop_2pct issues
-- diagnose_zd_structure.R - z/d characteristic exploration
+### 📄 background.tex
+- Mathematical background on data thinning methodology
+- Oracle definitions (FP-Oracle, OD-Oracle, TD-Oracle)
+- Model specification and evaluation metrics
+- **Status:** Current reference
 
-### summaries/
-Interim summary documents:
-- COMPREHENSIVE_ANALYSIS_SUMMARY.md - Full 10-config study results
-- SYSTEMATIC_AUDIT_RESULTS.md - Bug fix audit (Nov 25, 2025)
+### 📄 response_hacking.md ⭐
+- **MOST COMPREHENSIVE** - Complete history of response variable exploration
+- Documents discovery of weak priors + continuous responses
+- Final recommendations: WAGP (27.7%), POVPIP (16.6%), rents_home (11.1%)
+- Includes all experiments from Jan 2025
+- **Status:** **PRIMARY REFERENCE** for response variable selection
 
-### plots/
-Exploratory visualizations:
-- plots_proportional_vs_equal/ - Oracle curve comparisons
+### 📄 Data Thinning Paper.pdf
+- Original data thinning methodology paper
+- Theoretical foundation for the project
+- **Status:** Reference material
 
-### results/
-Exploratory analysis results:
-- results_prop_fine_grid/ - Fine-grid configs (1.25%, 1.5%, 1.75%)
+## Archive / Historical
 
-## Note
-All final analysis uses scripts and results in the root directory.
-See COMPREHENSIVE_SUMMARY_10_CONFIGS.md (root) for final results.
+### 📄 response_variable_analysis.md
+- Initial analysis from early exploration (Jan 12, 2025)
+- Analyzed population heterogeneity (PUMA SD)
+- **Status:** SUPERSEDED by response_hacking.md
+- Kept for historical reference only
+
+### 📄 architecture_change_analysis.md
+- Documents transition from pre-aggregated to on-the-fly sampling
+- Explains predictor matrix X decisions (population vs. estimated)
+- **Status:** Historical record of architecture decisions
+
+---
+
+## Quick Reference
+
+**For response variable selection:** Read `response_hacking.md` (comprehensive)
+
+**For methodology background:** Read `background.tex`
+
+**For data generation approach:** Read `architecture_change_analysis.md`
+
+---
+
+## Key Findings Summary
+
+From `response_hacking.md`:
+
+1. **Continuous responses dominate binary** (2-3× better differentiation)
+2. **Weak priors essential** (a=b=c=d ≤ 0.001) to induce overfitting
+3. **Fewer covariates = more spatial signal** (1-2 optimal)
+4. **Winner:** WAGP (wages) - 27.7% OD-Oracle MSE differentiation
+5. **Runner-up:** POVPIP (poverty) - 16.6% differentiation
+6. **Best binary:** rents_home - 11.1% with 2 covariates
+
+All U-shaped curves with clear interior optima.
