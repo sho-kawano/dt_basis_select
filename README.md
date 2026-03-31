@@ -22,7 +22,7 @@ computed via `survey::svymean()`.
 
 Benchmarks in method comparison:
 - **DIC / WAIC:** likelihood-based information criteria
-- **ESIM:** empirical simulation / parametric bootstrap (L=100)
+- **ESIM:** empirical simulation method adding noise to direct estimates treated as truth (L=100)
 
 ## Structure
 
