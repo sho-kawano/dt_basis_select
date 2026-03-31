@@ -1,0 +1,18 @@
+\begin{table}[ht]
+\centering
+\begin{tabular}{l rrr rrr}
+  \toprule
+  & \multicolumn{3}{c}{MAE} & \multicolumn{3}{c}{Bias} \\
+  \cmidrule(lr){2-4} \cmidrule(lr){5-7}
+  Method & 0.75\% & 1.25\% & 1.75\% & 0.75\% & 1.25\% & 1.75\% \\
+  \midrule
+  DT-MSE $\epsilon$=0.7 & 7.74 & 5.82 & 9.54 & $-$3.4 & $-$3.5 & $-$3.4 \\
+  DT-NLL $\epsilon$=0.7 & 7.68 & 5.88 & 10.14 & $-$2.8 & $-$2.8 & $-$0.8 \\
+  DIC & 6.18 & 5.70 & 10.68 & $-$2.6 & $-$1.4 & $+$0.4 \\
+  WAIC & 5.94 & 6.78 & 13.02 & $-$2.7 & $+$0.2 & $+$2.8 \\
+  ESIM & 9.60 & 7.44 & 7.38 & $-$8.8 & $-$7.0 & $-$6.7 \\
+  \bottomrule
+\end{tabular}
+\caption{MAE and mean bias from oracle basis count by method and design across $S=50$ simulation replicates. Columns indicate proportional-to-population allocation (PA) designs with overall sampling rates of 0.75\%, 1.25\%, 1.75\%. Negative bias indicates under-selection; positive indicates over-selection.}
+\label{tab:comparison}
+\end{table}

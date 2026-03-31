@@ -1,0 +1,610 @@
+---
+title: "Gap Decomposition Analysis for Data Thinning"
+author: "Analysis"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 12,
+  fig.height = 8,
+  dpi = 300
+)
+```
+
+# Overview
+
+This analysis examines the systematic gap introduced by data thinning in model selection.
+
+**Two key MSE quantities:**
+
+1. **Full Oracle MSE**: Fit on full data (z), evaluate vs true θ
+2. **Thinned Oracle MSE**: Fit on thinned data (z_train with mean ε×θ), evaluate vs true θ
+
+**The Gap:**
+
+$$\text{Gap} = \text{Thinned Oracle MSE} - \text{Full Oracle MSE}$$
+
+This gap represents the systematic penalty from using only a fraction ε of the data for training.
+
+**Key questions:**
+
+- How does the gap decrease as ε increases (more data in training fold)?
+- At what ε does the gap become negligible (< 5% of full oracle MSE)?
+- Does the relative gap (complex vs simple models) vanish around ε ≈ 0.6-0.7?
+
+# Data Loading
+
+```{r load-data}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+library(scales)
+
+# Custom theme
+theme_set(theme_minimal(base_size = 16) +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "gray90", color = NA),
+    strip.text = element_text(face = "bold", size = 18),
+    legend.position = "bottom",
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.title = element_text(size = 15)
+  ))
+
+# Load thinned oracle MSE (S=50)
+thinned_oracle <- readRDS("../results_summary/thinned_oracle_s50.RDS") %>%
+  filter(n_reps_used == 1)
+
+# Load full oracle MSE (S=50)
+results <- readRDS("../results_summary/equal_allocation_results.RDS")
+oracle_full <- results$oracle %>%
+  filter(config %in% c("equal_30", "equal_40", "equal_50",
+                       "equal_75", "equal_100", "equal_125")) %>%
+  select(comp_no, config, nbasis, full_mse = mse_true)
+
+# Verify S=50
+cat("comp_no range (thinned):", range(thinned_oracle$comp_no), "\n")
+cat("n_distinct comp_no:", dplyr::n_distinct(thinned_oracle$comp_no), "\n")
+cat("Data loaded successfully\n")
+```
+
+# Gap Computation
+
+```{r compute-gap}
+# Join thinned and full oracle, compute gap
+gap_data <- thinned_oracle %>%
+  left_join(oracle_full, by = c("comp_no", "config", "nbasis")) %>%
+  mutate(gap = thinned_mse - full_mse)
+
+# Check for missing values
+na_check <- gap_data %>%
+  summarise(
+    n_missing_gap = sum(is.na(gap)),
+    n_missing_full = sum(is.na(full_mse)),
+    n_missing_thinned = sum(is.na(thinned_mse))
+  )
+
+if (na_check$n_missing_gap > 0) {
+  cat("WARNING: Missing gap values:", na_check$n_missing_gap, "\n")
+} else {
+  cat("✓ No missing values\n")
+}
+```
+
+# Data Validation
+
+```{r validation}
+# Check: Thinned should be >= Full (thinning uses less data)
+validation_check <- gap_data %>%
+  group_by(config, epsilon) %>%
+  summarise(
+    n_violations = sum(gap < 0, na.rm = TRUE),
+    mean_gap = mean(gap, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+negative_gaps <- validation_check %>%
+  filter(n_violations > 0)
+
+if (nrow(negative_gaps) > 0) {
+  cat("WARNING: Some thinned MSE < full MSE (unexpected):\n")
+  print(negative_gaps)
+} else {
+  cat("✓ All thinned MSE >= full MSE (as expected)\n")
+}
+
+# Check: Gap should decrease as epsilon increases
+monotonicity_check <- gap_data %>%
+  filter(nbasis == 18) %>%
+  group_by(config, comp_no) %>%
+  arrange(epsilon) %>%
+  summarise(
+    is_monotonic = all(diff(gap) < 0),
+    .groups = "drop"
+  )
+
+pct_monotonic <- mean(monotonicity_check$is_monotonic) * 100
+
+cat(sprintf("\n✓ Monotonicity (gap decreases with epsilon): %.1f%% of cases\n",
+            pct_monotonic))
+
+# Summary by config
+config_summary <- gap_data %>%
+  group_by(config) %>%
+  summarise(
+    n_rows = n(),
+    mean_gap = mean(gap),
+    sd_gap = sd(gap),
+    mean_thinned = mean(thinned_mse),
+    mean_full = mean(full_mse),
+    .groups = "drop"
+  )
+
+cat("\nSummary by config (n_reps=1):\n")
+print(config_summary)
+```
+
+# Figure 1: Systematic Gap vs Epsilon
+
+Gap averaged over 50 comparisons shows how the systematic bias from thinning decreases as epsilon increases.
+
+```{r fig1-systematic-gap, fig.width=14, fig.height=6}
+# Focus on 4 nbasis values for visualization
+nbasis_viz <- c(6, 18, 30, 42)
+
+gap_summary <- gap_data %>%
+  filter(nbasis %in% nbasis_viz) %>%
+  group_by(config, epsilon, nbasis) %>%
+  summarise(
+    mean_gap = mean(gap),
+    se_gap = sd(gap) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Order configs by sample size and create labels
+config_order <- c("equal_30", "equal_40", "equal_50", "equal_75", "equal_100", "equal_125")
+config_labels <- c("n==30", "n==40", "n==50", "n==75", "n==100", "n==125")
+gap_summary$config <- factor(gap_summary$config, levels = config_order, labels = config_labels)
+
+ggplot(gap_summary, aes(x = epsilon, y = mean_gap, color = factor(nbasis))) +
+  geom_line(linewidth = 1.2, alpha=0.7) +
+  geom_point(size = 3) +
+  facet_wrap(~ config, nrow = 2, scales = "free_y", labeller = label_parsed) +
+  scale_color_brewer(palette = "Set1", name = "nbasis") +
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.2)) +
+  labs(
+    #title = "Systematic Gap: Thinned Oracle - Full Oracle MSE (n_reps=5)",
+    #subtitle = "Averaged over 20 comparisons. Fixed y-axis shows gap decreases with sample size.",
+    x = "Epsilon (proportion of data in training)",
+    y = "Thinning Gap",
+    #caption = "Lower gap = thinning penalty smaller. Gap → 0 as ε → 1."
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 20, face = "bold"),
+    strip.background = element_rect(fill = "gray90", color = NA),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 16, face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("plot1_gap.png", width = 14, height = 8, dpi = 300)
+```
+
+# Figure 2: Variance of DT MSE Estimator vs Epsilon
+
+Shows how the variance of the DT metric changes with epsilon, supporting Proposition 3.4 (variance increases for ε ≥ 0.5).
+
+```{r fig2-dt-variance, fig.width=14, fig.height=6}
+# Load DT results from paper_final (S=50)
+dt_epsilon <- results$dt_1fold
+
+dt_variance_data <- dt_epsilon %>%
+  filter(
+    config %in% c("equal_30", "equal_40", "equal_50",
+                  "equal_75", "equal_100", "equal_125"),
+    loss_function == "MSE",
+    n_reps_used == 1,
+    nbasis %in% c(6, 18, 30, 42)  # 4 values for visualization
+  ) %>%
+  group_by(config, epsilon, nbasis) %>%
+  summarise(
+    variance_dt = var(metric)* (n() - 1) / n(),
+    .groups = "drop"
+  )
+
+# Order configs with labels (redefine in case chunk runs independently)
+config_order <- c("equal_30", "equal_40", "equal_50", "equal_75", "equal_100", "equal_125")
+config_labels <- c("n==30", "n==40", "n==50", "n==75", "n==100", "n==125")
+dt_variance_data$config <- factor(dt_variance_data$config, levels = config_order, labels = config_labels)
+
+# Plot: Mirror Fig 1 structure
+ggplot(dt_variance_data, aes(x = epsilon, y = variance_dt,
+                               color = factor(nbasis))) +
+  geom_line(linewidth = 1.2, alpha=0.7) +
+  geom_point(size = 3) +
+  facet_wrap(~ config, nrow = 2, scales = "free_y", labeller = label_parsed) +
+  scale_color_brewer(palette = "Set1", name = "nbasis") +
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.2)) +
+  labs(
+    #title = "Variance of DT MSE Estimator vs Epsilon (n_reps=1)",
+    #subtitle = "Variance computed across 20 independent comparisons. Increases for ε ≥ 0.5.",
+    x = "Epsilon (proportion of data in training)",
+    y = "Variance of MSE Estimator",
+    #caption = "Higher variance = less stable estimates. Confirms Proposition 3.4."
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 20, face = "bold"),
+    strip.background = element_rect(fill = "gray90", color = NA),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 16, face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+# Save figure
+ggsave("plot2_variance.png", width = 14, height = 8, dpi = 300)
+```
+
+# Figure 3: The Bias-Variance Tradeoff
+
+Combining squared thinning gap (bias²) and variance of the MSE estimator shows the fundamental tradeoff.
+
+```{r fig3-tradeoff, fig.width=14, fig.height=8}
+# Compute squared gap (bias squared) from gap_data
+gap_squared <- gap_data %>%
+  filter(nbasis %in% c(6, 18, 30, 42)) %>%
+  group_by(config, epsilon, nbasis) %>%
+  summarise(
+    mean_gap_sq = mean(gap)^2,  # Square of mean gap
+    .groups = "drop"
+  )
+
+# Variance data already computed
+dt_variance_data <- dt_epsilon %>%
+  filter(
+    config %in% c("equal_30", "equal_40", "equal_50",
+                  "equal_75", "equal_100", "equal_125"),
+    loss_function == "MSE",
+    n_reps_used == 1,
+    nbasis %in% c(6, 18, 30, 42)
+  ) %>%
+  group_by(config, epsilon, nbasis) %>%
+  summarise(
+    variance_dt = var(metric) * (n() - 1) / n(),
+    .groups = "drop"
+  )
+
+# Combine: Total MSE = Bias² + Variance
+total_mse <- gap_squared %>%
+  left_join(dt_variance_data, by = c("config", "epsilon", "nbasis")) %>%
+  mutate(total_error = mean_gap_sq + variance_dt)
+
+# Apply config labels
+config_order <- c("equal_30", "equal_40", "equal_50", "equal_75", "equal_100", "equal_125")
+config_labels <- c("n==30", "n==40", "n==50", "n==75", "n==100", "n==125")
+total_mse$config <- factor(total_mse$config, levels = config_order, labels = config_labels)
+
+# Find minima for each config × nbasis
+minima_total <- total_mse %>%
+  group_by(config, nbasis) %>%
+  slice_min(total_error, n = 1)
+
+# Plot
+ggplot(total_mse, aes(x = epsilon, y = total_error, color = factor(nbasis))) +
+  geom_line(linewidth = 1.2, alpha=0.7) +
+  geom_point(size = 3) +
+  facet_wrap(~ config, nrow = 2, scales = "free_y", labeller = label_parsed) +
+  scale_color_brewer(palette = "Set1", name = "nbasis") +
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.2)) +
+  scale_y_continuous(labels = scales::scientific) +
+  labs(
+    x = "Epsilon (proportion of data in training)",
+    y = expression("Thinning Gap"^2 * " + Variance")
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 20, face = "bold"),
+    strip.background = element_rect(fill = "gray90", color = NA),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 16, face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("plot3_tradeoff.png", width = 14, height = 8, dpi = 300)
+```
+
+
+```{r fig3-tradeoff-log}
+# Plot
+ggplot(total_mse, aes(x = epsilon, y = log(total_error), color = factor(nbasis))) +
+  geom_line(linewidth = 1.2, alpha=0.7) +
+  geom_point(size = 3) +
+  facet_wrap(~ config, nrow = 2, scales = "free_y", labeller = label_parsed) +
+  scale_color_brewer(palette = "Set1", name = "nbasis") +
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.2)) +
+  scale_y_continuous(labels = scales::scientific) +
+  labs(
+    x = "Epsilon (proportion of data in training)",
+    y = expression("Thinning Gap"^2 * " + Variance")
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 20, face = "bold"),
+    strip.background = element_rect(fill = "gray90", color = NA),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 16, face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("plot3_tradeoff_log.png", width = 14, height = 8, dpi = 300)
+```
+
+
+
+```{r fig3-optimal-epsilon-summary}
+# Summary of optimal epsilon by config and nbasis
+optimal_summary <- minima_total %>%
+  select(config, nbasis, epsilon_opt = epsilon, min_total_error = total_error) %>%
+  arrange(config, nbasis)
+
+cat("\nOptimal Epsilon (minimizing Bias² + Variance) by Config and Model:\n")
+print(optimal_summary, n = 30)
+
+# Overall pattern
+overall_optimal <- optimal_summary %>%
+  group_by(nbasis) %>%
+  summarise(
+    mean_eps_opt = mean(epsilon_opt),
+    median_eps_opt = median(epsilon_opt),
+    range = paste(min(epsilon_opt), "-", max(epsilon_opt)),
+    .groups = "drop"
+  )
+
+cat("\n\nOverall Pattern Across Configs:\n")
+print(overall_optimal, n = 20)
+```
+
+
+```{r}
+overall_optimal
+```
+
+
+### Key Insights
+
+1. **Interior optimum:** The bias-variance tradeoff creates an interior minimum, typically at **ε ≈ 0.4-0.6**. The U-shaped curves make this pattern visible across all configurations.
+
+2. **Model-dependent optimal ε:**
+   - Simple models (nbasis=6): Often optimal at lower ε (~0.4)
+   - Moderate models (nbasis=18, 30): Typically optimal at ε ≈ 0.5 (often overlap)
+   - Complex models (nbasis=42): Often optimal at higher ε (~0.5-0.6)
+
+3. **Contrast with Section 6 recommendation (ε ≈ 0.6-0.7):**
+   - The optimal ε here minimizes estimation error of MSE_full
+   - Section 6's recommendation prioritizes **fair model comparison** (differential bias vanishes)
+   - Different objectives → different optimal ε values
+
+4. **Practical implication:**
+   - For estimating a single model's MSE: Use ε from this analysis
+   - For comparing multiple models: Use higher ε (0.6-0.7) to ensure rankings are unbiased
+
+## Extra: Variance-Minimizing Epsilon by Model Complexity
+
+Figure 2 shows that variance follows a U-shaped pattern with epsilon. Where is the minimum per-design?
+
+```{r extra-variance-minima, fig.width=14, fig.height=8}
+# Compute variance for each config separately
+variance_by_config <- dt_epsilon %>%
+  filter(
+    config %in% c("equal_30", "equal_40", "equal_50",
+                  "equal_75", "equal_100", "equal_125"),
+    loss_function == "MSE",
+    n_reps_used == 1,
+    nbasis %in% c(6, 18, 30, 42)  # 4 values for visualization
+  ) %>%
+  group_by(config, epsilon, nbasis) %>%
+  summarise(variance = var(metric) * (n() - 1) / n(), .groups = "drop")
+
+# Find minima for each config × nbasis
+minima <- variance_by_config %>%
+  group_by(config, nbasis) %>%
+  slice_min(variance, n = 1)
+
+# Apply config labels
+config_order <- c("equal_30", "equal_40", "equal_50", "equal_75", "equal_100", "equal_125")
+config_labels <- c("n==30", "n==40", "n==50", "n==75", "n==100", "n==125")
+variance_by_config$config <- factor(variance_by_config$config, levels = config_order, labels = config_labels)
+minima$config <- factor(minima$config, levels = config_order, labels = config_labels)
+
+# Plot
+ggplot(variance_by_config, aes(x = epsilon, y = variance, color = factor(nbasis))) +
+  geom_line(linewidth = 1.2, alpha = 0.7) +
+  geom_point(size = 3) +
+  geom_point(data = minima, size = 5, shape = 21, fill = "white", stroke = 1.5) +
+  facet_wrap(~ config, nrow = 2, scales = "free_y", labeller = label_parsed) +
+  scale_color_brewer(palette = "Set1", name = "nbasis") +
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.2)) +
+  scale_y_continuous(labels = scales::scientific) +
+  labs(
+    x = "Epsilon (proportion of data in training)",
+    y = "Variance of MSE Estimator",
+    caption = "Open circles mark the minimum variance for each model complexity. U-shaped pattern: low ε lacks training data, high ε lacks test data."
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 20, face = "bold"),
+    strip.background = element_rect(fill = "gray90", color = NA),
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 16, face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r variance-minima-summary}
+# Summary table of optimal epsilon by config and nbasis
+optimal_summary <- minima %>%
+  select(config, nbasis, epsilon_opt = epsilon, min_variance = variance) %>%
+  arrange(config, nbasis)
+
+cat("\nVariance-Minimizing Epsilon by Config and Model Complexity:\n")
+print(optimal_summary, n = 30)
+
+# Overall pattern
+overall_pattern <- optimal_summary %>%
+  group_by(nbasis) %>%
+  summarise(
+    mean_eps_opt = mean(epsilon_opt),
+    range_eps = paste(min(epsilon_opt), "-", max(epsilon_opt)),
+    .groups = "drop"
+  )
+
+cat("\n\nOverall Pattern (averaged across configs):\n")
+print(overall_pattern, n = 20)
+```
+
+### Key Insights
+
+1. **Consistent U-shaped pattern** across all designs and model complexities
+   - Minimum typically at **ε = 0.3-0.4** regardless of sample size
+
+2. **Simple models** (nbasis = 6, 18): Generally minimize at **ε = 0.3**
+   - Less training data needed for stable estimation
+
+3. **Complex models** (nbasis = 30, 42): Generally minimize at **ε = 0.4**
+   - Need more training data to estimate many parameters
+
+4. **The variance-optimal region (ε = 0.3-0.4) is NOT the comparison-optimal region**
+   - The "Relative Gap" extra plot shows differential bias persists at low ε
+   - Section 6 demonstrates ε ≈ 0.6-0.7 needed for fair comparison
+   - Tradeoff: Accept ~2× variance to eliminate complexity bias
+
+# Extra: Gap Variability Across Comparisons
+
+Distribution of gap shows variability across the 20 independent comparisons.
+
+```{r extra-gap-variability, fig.width=14, fig.height=6}
+gap_dist <- gap_data %>%
+  filter(nbasis %in% nbasis_viz) %>%
+  mutate(config = factor(config, levels = config_order))
+
+ggplot(gap_dist, aes(x = factor(epsilon), y = gap, fill = factor(nbasis))) +
+  geom_boxplot(outlier.size = 0.5, alpha = 0.7) +
+  facet_wrap(~ config, nrow = 2, scales = "free_y") +
+  scale_fill_brewer(palette = "Set1", name = "nbasis") +
+  labs(
+    title = "Gap Distribution Across 20 Comparisons (n_reps=1)",
+    subtitle = "Each boxplot shows spread across comparisons for fixed (config, epsilon, nbasis)",
+    x = "Epsilon",
+    y = "Gap (MSE units)",
+    caption = "Wider boxes = more variability across comparisons"
+  ) +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8)
+  )
+```
+
+# Extra: Relative Gap (Complexity Penalty)
+
+When does thinning stop differentially penalizing complex vs simple models?
+
+```{r extra-relative-gap, fig.width=14, fig.height=5}
+# Compute gap difference: complex (nbasis=42) - simple (nbasis=6)
+relative_gap <- gap_data %>%
+  filter(nbasis %in% c(6, 42)) %>%
+  select(comp_no, config, epsilon, nbasis, gap) %>%
+  pivot_wider(names_from = nbasis, values_from = gap, names_prefix = "nbasis_") %>%
+  mutate(relative_gap = nbasis_42 - nbasis_6) %>%
+  group_by(config, epsilon) %>%
+  summarise(
+    mean_relative_gap = mean(relative_gap, na.rm = TRUE),
+    se_relative_gap = sd(relative_gap, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  mutate(config = factor(config, levels = config_order))
+
+ggplot(relative_gap, aes(x = epsilon, y = mean_relative_gap, color = config)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+  geom_ribbon(
+    aes(ymin = mean_relative_gap - se_relative_gap,
+        ymax = mean_relative_gap + se_relative_gap, fill = config),
+    alpha = 0.15, color = NA
+  ) +
+  scale_color_brewer(palette = "Dark2", name = "Config") +
+  scale_fill_brewer(palette = "Dark2", name = "Config") +
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.2)) +
+  labs(
+    title = "Relative Gap: Complex (nbasis=42) - Simple (nbasis=6)",
+    subtitle = "When relative gap ≈ 0, thinning penalizes models equally regardless of complexity",
+    x = "Epsilon",
+    y = "Relative Gap (MSE units)",
+    caption = "Crossing zero suggests epsilon where model ranking becomes stable under thinning"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+# Statistical Summary Tables
+
+## Mean Gap by Config × Epsilon
+
+```{r table-mean-gap}
+table_mean_gap <- gap_data %>%
+  group_by(config, epsilon) %>%
+  summarise(
+    mean_gap = mean(gap),
+    mean_pct_increase = mean(100 * gap / full_mse),
+    .groups = "drop"
+  ) %>%
+  mutate(config = factor(config, levels = config_order)) %>%
+  arrange(config, epsilon)
+
+# Reshape for easier reading
+table_wide <- table_mean_gap %>%
+  select(config, epsilon, mean_gap) %>%
+  pivot_wider(names_from = epsilon, values_from = mean_gap, names_prefix = "eps_")
+
+table_wide
+kable(table_wide, digits = 5, caption = "Mean Gap (Thinned - Full Oracle MSE) by Config and Epsilon")
+```
+
+
+
+
+---
+
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```

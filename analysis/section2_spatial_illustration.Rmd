@@ -1,0 +1,331 @@
+---
+title: "Section 2: Spatial Smoothing Illustration"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: cosmo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 14, fig.height = 5)
+library(tidyverse)
+library(sf)
+library(tigris)
+library(latex2exp)
+options(tigris_use_cache = TRUE)
+```
+
+# Configuration
+
+```{r config}
+# Sampling design to visualize
+CONFIG <- "equal_75"  # Options: equal_40, equal_50, equal_75, equal_100, prop_0.5pct, etc.
+
+# Which comparison to use
+COMP_NO <- 13
+# 10, 2, 12
+# Basis function ranks to compare
+NBASIS_VALUES <- c(6, 42)
+```
+
+# Load Data
+
+```{r load-data}
+# Map config names to results directories
+config_dirs <- list(
+  equal_30 = "_results_equal30",
+  equal_40 = "_results_equal40",
+  equal_50 = "_results_equal50",
+  equal_75 = "_results_equal75",
+  equal_100 = "_results_equal100",
+  equal_125 = "_results_equal125",
+  prop_0.75pct = "_results_prop0.75pct",
+  prop_1p25pct = "_results_prop1p25pct",
+  prop_1p75pct = "_results_prop1p75pct"
+)
+
+results_dir <- file.path("..", config_dirs[[CONFIG]])
+chains_file <- file.path(results_dir, sprintf("comparison_%03d/fit_on_z/chains.RDS", COMP_NO))
+
+# Load pre-fitted models
+chains <- readRDS(chains_file)
+
+# Extract spatial smooth (theta - w) for selected nbasis values
+models <- lapply(NBASIS_VALUES, function(nb) {
+  chain_idx <- which(sapply(chains, function(x) x$nbasis) == nb)
+
+  if (length(chain_idx) == 0) {
+    stop(sprintf("nbasis = %d not found in chains", nb))
+  }
+
+  theta_mcmc <- chains[[chain_idx]]$chain$theta
+  w_mcmc <- chains[[chain_idx]]$chain$w
+  puma_ids <- chains[[chain_idx]]$puma_ids
+
+  # Compute X*beta = theta - w (spatial smooth without IID noise)
+  spatial_smooth <- colMeans(theta_mcmc) - colMeans(w_mcmc)
+
+  list(
+    nbasis = nb,
+    puma_ids = puma_ids,
+    spatial_smooth = spatial_smooth
+  )
+})
+
+# Get CA PUMA boundaries from Census
+ca_pumas <- pumas(state = "CA", cb = TRUE, year = 2020)
+
+# Create estimates dataframe
+estimates_df <- bind_rows(
+  lapply(models, function(m) {
+    tibble(
+      PUMA = m$puma_ids,
+      spatial_smooth = m$spatial_smooth,
+      nbasis = m$nbasis
+    )
+  })
+)
+
+# Join with shapefile
+map_data <- ca_pumas %>%
+  mutate(PUMA = PUMACE20) %>%
+  inner_join(estimates_df, by = "PUMA") %>%
+  mutate(nbasis = factor(nbasis, levels = NBASIS_VALUES))
+
+cat(sprintf("Loaded %d PUMA boundaries with estimates for nbasis: %s\n",
+            nrow(map_data) / length(NBASIS_VALUES),
+            paste(NBASIS_VALUES, collapse = ", ")))
+```
+
+# Figure 0: Spatial Smoothing Across Model Complexity
+
+```{r figure0-spatial-map, fig.width=12, fig.height=8}
+# LA County approximate bounding box
+la_bbox <- c(xmin = -118.7, xmax = -117.8, ymin = 33.6, ymax = 34.2)
+
+# Get CA bounding box for positioning inset
+ca_bbox <- st_bbox(map_data)
+
+# Create separate plots for each nbasis with inset
+plots_with_inset <- lapply(unique(map_data$nbasis), function(nb) {
+  # Filter data for this nbasis
+  data_nb <- map_data %>% filter(nbasis == nb)
+
+  # Main plot
+  p_main <- ggplot(data_nb) +
+    geom_sf(aes(fill = spatial_smooth), color = "gray30", linewidth = 0.1) +
+    # Add rectangle showing zoom area
+    geom_rect(aes(xmin = la_bbox["xmin"], xmax = la_bbox["xmax"],
+                  ymin = la_bbox["ymin"] + 0.1, ymax = la_bbox["ymax"]),
+              fill = NA, color = "red", linewidth = 0.8, inherit.aes = FALSE) +
+    scale_fill_gradient(low = "white", high = "darkblue",
+                       limits = range(map_data$spatial_smooth),
+                       name = TeX("$X\\beta$")) +
+    # scale_fill_viridis_c(
+    #   option = "viridis",
+    #   limits = range(map_data$spatial_smooth),
+    #   name = TeX("$X\\beta$")
+    # ) +
+    labs(title = paste0("p = ", nb)) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank(),
+      plot.title = element_text(size = 24, face = "bold"),
+      legend.position = "right",
+      legend.text = element_text(size = 14),
+      legend.title = element_text(size = 16)
+    )
+
+  # Zoom inset (smaller)
+  p_inset <- ggplot(data_nb) +
+    geom_sf(aes(fill = spatial_smooth), color = "gray30", linewidth = 0.3) +
+    coord_sf(xlim = c(la_bbox["xmin"], la_bbox["xmax"]),
+             ylim = c(la_bbox["ymin"], la_bbox["ymax"]),
+             expand = FALSE) +
+    scale_fill_gradient(low = "white", high = "darkblue",
+                       limits = range(map_data$spatial_smooth)) +
+    # scale_fill_viridis_c(
+    #   option = "viridis",
+    #   limits = range(map_data$spatial_smooth)
+    # ) +
+    theme_void() +
+    theme(
+      panel.background = element_rect(fill = "white", color = NA),
+      legend.position = "none",
+      plot.background = element_rect(fill = "white", color = NA)
+    )
+
+  # Convert inset to grob
+  inset_grob <- ggplotGrob(p_inset)
+
+  # Inset position coordinates
+  inset_xmin <- ca_bbox["xmin"] + 0.6 * (ca_bbox["xmax"] - ca_bbox["xmin"])
+  inset_xmax <- ca_bbox["xmax"]
+  inset_ymin <- ca_bbox["ymin"] + 0.4 * (ca_bbox["ymax"] - ca_bbox["ymin"])
+  inset_ymax <- ca_bbox["ymin"] + 0.67 * (ca_bbox["ymax"] - ca_bbox["ymin"])
+
+  # Add inset to main plot, then draw red border on top (avoids clipping)
+  p_with_inset <- p_main +
+    annotation_custom(
+      grob = inset_grob,
+      xmin = inset_xmin, xmax = inset_xmax,
+      ymin = inset_ymin, ymax = inset_ymax
+    ) +
+    annotate("rect", xmin = inset_xmin, xmax = inset_xmax,
+             ymin = inset_ymin, ymax = inset_ymax,
+             fill = NA, color = "red", linewidth = 0.8)
+
+  p_with_inset
+})
+
+# Combine plots side by side using patchwork
+library(patchwork)
+combined <- wrap_plots(plots_with_inset, nrow = 1) +
+  plot_annotation(
+    #title = "Spatial Smoothing with Los Angeles Inset (red box)",
+    #theme = theme(plot.title = element_text(size = 24, face = "bold"))
+  )
+combined
+```
+
+**Key observation:** The LA inset reveals the spatial smoothing effect. With nbasis = 6, the entire LA region is highly homogeneous (strong spatial pooling). With nbasis = 60, neighborhood-level variation emerges - but note it's still much smoother than raw data since we're showing X*beta without IID noise.
+
+
+```{r}
+ggsave("plot0_la_zoom.png", combined, width = 12, height = 8, dpi = 300)
+```
+
+
+# Figure 0b: SF Bay Area Zoom
+
+```{r figure0b-sf-zoom, fig.width=14, fig.height=6}
+# SF Bay Area approximate bounding box
+sf_bbox <- c(xmin = -122.6, xmax = -121.7, ymin = 37.35, ymax = 38.05)
+
+# Get CA bounding box for positioning inset
+ca_bbox <- st_bbox(map_data)
+
+# Create separate plots for each nbasis with inset
+plots_with_inset_sf <- lapply(unique(map_data$nbasis), function(nb) {
+  # Filter data for this nbasis
+  data_nb <- map_data %>% filter(nbasis == nb)
+
+  # Main plot
+  p_main <- ggplot(data_nb) +
+    geom_sf(aes(fill = spatial_smooth), color = "gray30", linewidth = 0.1) +
+    # Add rectangle showing zoom area
+    geom_rect(aes(xmin = sf_bbox["xmin"], xmax = sf_bbox["xmax"],
+                  ymin = sf_bbox["ymin"], ymax = sf_bbox["ymax"]),
+              fill = NA, color = "red", linewidth = 0.8, inherit.aes = FALSE) +
+    scale_fill_gradient(low = "white", high = "darkblue",
+                       limits = range(map_data$spatial_smooth)) +
+    # scale_fill_viridis_c(
+    #   option = "viridis",
+    #   limits = range(map_data$spatial_smooth),
+    #   name = TeX("$X\\beta$")
+    # ) +
+    labs(title = paste0("p = ", nb)) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank(),
+      plot.title = element_text(size = 16, face = "bold"),
+      legend.position = "right"
+    )
+
+  # Zoom inset (smaller)
+  p_inset <- ggplot(data_nb) +
+    geom_sf(aes(fill = spatial_smooth), color = "gray30", linewidth = 0.3) +
+    coord_sf(xlim = c(sf_bbox["xmin"], sf_bbox["xmax"]),
+             ylim = c(sf_bbox["ymin"], sf_bbox["ymax"]),
+             expand = FALSE) +
+    scale_fill_gradient(low = "white", high = "darkblue",
+                       limits = range(map_data$spatial_smooth)) +
+    # scale_fill_viridis_c(
+    #   option = "viridis",
+    #   limits = range(map_data$spatial_smooth)
+    # ) +
+    theme_void() +
+    theme(
+      panel.background = element_rect(fill = "white", color = NA),
+      legend.position = "none",
+      plot.background = element_rect(fill = "white", color = NA)
+    )
+
+  # Convert inset to grob
+  inset_grob <- ggplotGrob(p_inset)
+
+  # Inset position coordinates
+  inset_xmin <- ca_bbox["xmin"] + 0.6 * (ca_bbox["xmax"] - ca_bbox["xmin"])
+  inset_xmax <- ca_bbox["xmax"]
+  inset_ymin <- ca_bbox["ymin"] + 0.62 * (ca_bbox["ymax"] - ca_bbox["ymin"])
+  inset_ymax <- ca_bbox["ymin"] + 0.92 * (ca_bbox["ymax"] - ca_bbox["ymin"])
+
+  # Add inset to main plot, then draw red border on top (avoids clipping)
+  p_with_inset <- p_main +
+    annotation_custom(
+      grob = inset_grob,
+      xmin = inset_xmin, xmax = inset_xmax,
+      ymin = inset_ymin, ymax = inset_ymax
+    ) +
+    annotate("rect", xmin = inset_xmin, xmax = inset_xmax,
+             ymin = inset_ymin, ymax = inset_ymax,
+             fill = NA, color = "red", linewidth = 0.8)
+
+  p_with_inset
+})
+
+# Combine plots side by side using patchwork
+combined_sf <- wrap_plots(plots_with_inset_sf, nrow = 1) +
+  plot_annotation(
+    #title = "Spatial Smoothing with SF Bay Area Inset (red box)",
+    theme = theme(plot.title = element_text(size = 16, face = "bold"))
+  )
+
+combined_sf
+
+#ggsave("plot0_sf_zoom.png", combined_sf, width = 14, height = 6, dpi = 300)
+```
+
+**Key observation:** The SF Bay Area inset demonstrates spatial smoothing across the dense urban core. With nbasis = 6, SF/Oakland/San Jose appear as one smooth region. With nbasis = 60, distinct patterns emerge for each city and neighborhood.
+
+**Interpretation:** Maps show **X*beta = theta - w** (spatial smooth without IID noise), isolating the spatial basis contribution.
+
+Model selection involves choosing the number of spatial basis functions (nbasis), which controls spatial smoothing:
+
+- **Low complexity (nbasis = 6)**: Strong spatial smoothing - neighboring areas have very similar values
+- **High complexity (nbasis = 60)**: Weak smoothing - more local variation between neighbors
+
+By removing the IID random effects (w), these maps clearly show how the spatial basis functions pool information across space. The optimal choice balances bias (underfitting with too few basis functions) and variance (overfitting with too many).
+
+# Summary Statistics
+
+```{r summary-stats}
+summary_stats <- bind_rows(
+  lapply(models, function(m) {
+    tibble(
+      nbasis = m$nbasis,
+      mean = mean(m$spatial_smooth),
+      sd = sd(m$spatial_smooth),
+      range = max(m$spatial_smooth) - min(m$spatial_smooth)
+    )
+  })
+)
+
+summary_stats
+```
+
+As nbasis increases: SD ↑, Range ↑ (less smoothing, more local variation)
+
+---
+
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```
