@@ -83,7 +83,8 @@ margin_df %>%
     .groups = "drop"
   ) %>% print()
 
-cat("\n--- Grand mean oracle nbasis (across all 5 designs) ---\n")
+cat(sprintf("\n--- Grand mean oracle nbasis (across all %d designs) ---\n",
+            n_distinct(margin_df$config)))
 cat(sprintf("  %.1f\n", mean(margin_df$oracle_nbasis)))
 
 cat("\n--- Plateau width (5% tolerance) ---\n")
@@ -112,9 +113,9 @@ margin_df %>%
 
 cat("\n=== PART 2: Distribution plots ===\n")
 
-# Order configs by sample size
-config_order <- c("prop_0.75pct", "prop_1p25pct", "prop_1p5pct", "prop_1p75pct", "prop_2p25pct")
-config_labels <- c("0.75%", "1.25%", "1.5%", "1.75%", "2.25%")
+# Order configs by sample size (trio: 0.75% / 1.25% / 1.75%)
+config_order <- c("prop_0.75pct", "prop_1p25pct", "prop_1p75pct")
+config_labels <- c("0.75%", "1.25%", "1.75%")
 margin_df$config_f <- factor(margin_df$config, levels = config_order, labels = config_labels)
 
 # 2a: Histogram of margin_1v2
@@ -260,7 +261,9 @@ for (q in c(0, 0.25, 0.50)) {
 
 cat("\n\n=== SUMMARY ===\n")
 cat("Key numbers to check:\n")
-cat(sprintf("  Total samples: %d (5 designs x 50 seeds)\n", nrow(margin_df)))
+cat(sprintf("  Total samples: %d (%d designs x %d seeds)\n",
+            nrow(margin_df), n_distinct(margin_df$config),
+            nrow(margin_df) %/% n_distinct(margin_df$config)))
 cat(sprintf("  Grand mean oracle nbasis: %.1f\n", mean(margin_df$oracle_nbasis)))
 cat(sprintf("  Grand median margin (1v2): %.6f\n", median(margin_df$margin_1v2)))
 cat(sprintf("  Grand mean plateau width (5%%): %.1f nbasis\n", mean(margin_df$plateau_width_5pct)))

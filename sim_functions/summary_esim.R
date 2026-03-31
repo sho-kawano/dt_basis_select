@@ -54,7 +54,7 @@ summary_esim <- function(comp_no, results_dir,
     rename(model = method) %>%
     mutate(
       method = paste0("ESIM_", validation),
-      metric_type = "Av.MSE"
+      metric_type = "MSE"
     ) %>%
     relocate(comp_no, method, model, metric, metric_type, nbasis)
 }
