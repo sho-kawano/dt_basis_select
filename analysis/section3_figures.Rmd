@@ -153,13 +153,13 @@ config_summary <- gap_data %>%
     .groups = "drop"
   )
 
-cat("\nSummary by config (n_reps=5):\n")
+cat("\nSummary by config (n_reps=1):\n")
 print(config_summary)
 ```
 
 # Figure 1: Systematic Gap vs Epsilon
 
-Gap averaged over 20 comparisons shows how the systematic bias from thinning decreases as epsilon increases.
+Gap averaged over 50 comparisons shows how the systematic bias from thinning decreases as epsilon increases.
 
 ```{r fig1-systematic-gap, fig.width=14, fig.height=6}
 # Focus on 4 nbasis values for visualization

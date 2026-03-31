@@ -43,7 +43,7 @@ config_dirs <- list(
   equal_125 = "_results_equal125",
   prop_0.75pct = "_results_prop0.75pct",
   prop_1p25pct = "_results_prop1p25pct",
-  prop_1p75pct = "_results_prop1p75pct_comparison"
+  prop_1p75pct = "_results_prop1p75pct"
 )
 
 results_dir <- file.path("..", config_dirs[[CONFIG]])
