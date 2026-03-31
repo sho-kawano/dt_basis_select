@@ -72,6 +72,7 @@ oracle_consistency_analysis/*
 archive/
 update/
 _archive/
+models/_archive/
 
 # Old/superseded summary scripts
 summarize_results.R

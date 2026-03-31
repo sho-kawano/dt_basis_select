@@ -124,13 +124,13 @@ p1 <- ggplot(margin_df, aes(x = margin_1v2)) +
   labs(x = "Oracle margin (2nd best - best MSE)", y = "Count",
        title = "Distribution of oracle margins by design") +
   theme_minimal()
-ggsave("analysis/plot_oracle_margin_hist.png", p1, width = 12, height = 3.5)
+ggsave("p1_analysis/plot_oracle_margin_hist.png", p1, width = 12, height = 3.5)
 cat("  Saved: analysis/plot_oracle_margin_hist.png\n")
 
 # 2b: Log-scale version
 p2 <- p1 + scale_x_log10() +
   labs(x = "Oracle margin (log scale)", title = "Oracle margins (log scale)")
-ggsave("analysis/plot_oracle_margin_hist_log.png", p2, width = 12, height = 3.5)
+ggsave("p1_analysis/plot_oracle_margin_hist_log.png", p2, width = 12, height = 3.5)
 cat("  Saved: analysis/plot_oracle_margin_hist_log.png\n")
 
 # 2c: Plateau width distribution
@@ -141,7 +141,7 @@ p3 <- ggplot(margin_df, aes(x = plateau_width_5pct)) +
        y = "Count",
        title = "Width of near-optimal plateau by design") +
   theme_minimal()
-ggsave("analysis/plot_plateau_width.png", p3, width = 12, height = 3.5)
+ggsave("p1_analysis/plot_plateau_width.png", p3, width = 12, height = 3.5)
 cat("  Saved: analysis/plot_plateau_width.png\n")
 
 # 2d: Scatter of margin vs plateau width
@@ -151,7 +151,7 @@ p4 <- ggplot(margin_df, aes(x = margin_1v2, y = plateau_width_5pct)) +
   labs(x = "Oracle margin (1v2)", y = "Plateau width (5%)",
        title = "Margin vs plateau width") +
   theme_minimal()
-ggsave("analysis/plot_margin_vs_plateau.png", p4, width = 12, height = 3.5)
+ggsave("p1_analysis/plot_margin_vs_plateau.png", p4, width = 12, height = 3.5)
 cat("  Saved: analysis/plot_margin_vs_plateau.png\n")
 
 # ==============================================================================
