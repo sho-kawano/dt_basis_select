@@ -73,6 +73,8 @@ archive/
 update/
 _archive/
 models/_archive/
+p1_analysis/plots_before_change/
+"p1_analysis/Design-Based Sim Summary.md"
 
 # Old/superseded summary scripts
 summarize_results.R
