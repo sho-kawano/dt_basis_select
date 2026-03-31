@@ -9,7 +9,7 @@
 # Seeds 1-50 per design
 # NO ESIM needed for equal allocation
 #
-# Section 4 note: dt_5fold required for equal_50, equal_75, and equal_100
+# Section 4 note: dt_5fold runs only for designs in DT_5FOLD_DESIGNS
 # ==============================================================================
 
 library(parallel)
