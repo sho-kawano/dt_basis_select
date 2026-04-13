@@ -30,8 +30,7 @@ Benchmarks in method comparison:
 |-----------|----------|
 | `sim_functions/` | Core pipeline: sampling, model fitting, DT, ESIM, metrics |
 | `models/` | Spatial basis Fay-Herriot Gibbs sampler |
-| `p1_analysis/` | Paper analysis notebooks and figures (Sections 2–6) |
-| `p2_analysis/` | Exploratory analysis (IS oracle) |
+| `core_analysis/` | Paper analysis notebooks and figures (Sections 2–6) |
 | `results_summary/` | Aggregated results (S=50) |
 | `run_equal_allocation.R` | Driver: equal-allocation designs (Section 6.2) |
 | `run_methodcomp.R` | Driver: proportional-allocation method comparison (Section 6.3) |

@@ -95,3 +95,5 @@ results/
 
 # Aggregated multi-config results (can be regenerated)
 results_multi_config/
+claude.md
+p2_analysis/
