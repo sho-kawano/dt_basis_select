@@ -15,7 +15,7 @@ Fay-Herriot models with p ∈ {3, 6, …, 60} Moran's I spatial basis functions
 via Gibbs sampling (`models/spatial_basis_fh.R`).
 
 Two sampling designs are considered. Equal allocation designs (target n_i per
-area: 30, 50, 75, 100, 125) are used to study how the thinning fraction ε and
+area: 30, 40, 50, 75, 100, 125) are used to study how the thinning fraction ε and
 number of repeats R affect model selection performance. Proportional-to-population
 allocation designs (0.75%, 1.25%, 1.75% sampling rates) are used to benchmark
 DT against existing methods under realistic sample size variation.

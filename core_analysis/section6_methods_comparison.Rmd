@@ -21,7 +21,7 @@ library(xtable)
 Comparison of model selection methods on **proportional allocation (PA) designs**:
 
 - **Designs:** 0.75%, 1.25%, 1.75% sampling rates
-- **Methods:** DT-MSE, DT-Likelihood (ε = 0.7, R=5), DIC, WAIC, ESIM
+- **Methods:** DT-MSE, DT-Likelihood (ε = 0.6, R=5), DIC, WAIC, ESIM
 - **Models:** p ∈ {3, 6, 9, ..., 60} spatial basis functions (20 candidate models)
 - **Samples:** S = 50 per design
 
@@ -54,10 +54,10 @@ ic_selections <- oracle_all %>%
   mutate(method_type = method_label, epsilon = NA_real_) %>%
   ungroup()
 
-# DT selections (R=5 only, epsilon = 0.7)
+# DT selections (R=5 only, epsilon = 0.6)
 dt_selections <- dt_all %>%
   filter(n_reps_used == 5,
-         abs(epsilon - 0.7) < 0.001) %>%
+         abs(epsilon - 0.6) < 0.001) %>%
   mutate(
     method_type = case_when(
       str_detect(method, "MSE") ~ "DT-MSE",
@@ -138,8 +138,8 @@ print(oracle_stats)
 ```{r comparison_table}
 # Filter to methods for table
 table_methods <- c(
-  "DT-MSE ε=0.7",
-  "DT-NLL ε=0.7",
+  "DT-MSE ε=0.6",
+  "DT-NLL ε=0.6",
   "DIC",
   "WAIC",
   "ESIM"
@@ -155,7 +155,7 @@ comp_stats <- deviations_all %>%
   summarise(MAE = mean(abs_deviation), bias = mean(deviation), .groups = "drop")
 
 # Fixed order: DT-first, then info criteria, then ESIM
-method_order <- c("DT-MSE \u03b5=0.7", "DT-NLL \u03b5=0.7", "DIC", "WAIC", "ESIM")
+method_order <- c("DT-MSE \u03b5=0.6", "DT-NLL \u03b5=0.6", "DIC", "WAIC", "ESIM")
 
 # Display HTML version
 comp_stats %>%
@@ -221,9 +221,9 @@ cat(paste(latex_lines, collapse = "\n"))
 # Output 2: Boxplot of Deviations
 
 ```{r deviation_boxplot, fig.width=10, fig.height=4}
-# Filter to keep only ε=0.7 for DT methods
+# Filter to keep only ε=0.6 for DT methods
 deviations_plot <- deviations_all %>%
-  filter(is.na(epsilon) | abs(epsilon - 0.7) < 0.001) %>%
+  filter(is.na(epsilon) | abs(epsilon - 0.6) < 0.001) %>%
   mutate(
     config_label = case_when(
       config == "prop_0.75pct" ~ "0.75% PA",
@@ -232,8 +232,8 @@ deviations_plot <- deviations_all %>%
     ),
     # Set factor order for x-axis
     method_label = factor(method_label, levels = c(
-      "DT-MSE \u03b5=0.7",
-      "DT-NLL \u03b5=0.7",
+      "DT-MSE \u03b5=0.6",
+      "DT-NLL \u03b5=0.6",
       "DIC",
       "WAIC",
       "ESIM"
@@ -364,7 +364,7 @@ scatter_dat <- deviations_all %>%
   filter(
     config == "prop_1p75pct",
     method_label %in% table_methods,
-    is.na(epsilon) | abs(epsilon - 0.7) < 0.001
+    is.na(epsilon) | abs(epsilon - 0.6) < 0.001
   ) %>%
   left_join(
     oracle_margins %>% filter(config == "prop_1p75pct"),
@@ -372,8 +372,8 @@ scatter_dat <- deviations_all %>%
   ) %>%
   mutate(
     method_clean = case_when(
-      method_label == "DT-MSE \u03b5=0.7" ~ "DT-MSE",
-      method_label == "DT-NLL \u03b5=0.7" ~ "DT-NLL",
+      method_label == "DT-MSE \u03b5=0.6" ~ "DT-MSE",
+      method_label == "DT-NLL \u03b5=0.6" ~ "DT-NLL",
       TRUE ~ method_label
     ),
     method_clean = factor(method_clean, levels = c("DT-MSE", "DT-NLL", "DIC", "WAIC", "ESIM")),

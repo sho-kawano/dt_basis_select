@@ -62,12 +62,6 @@ _for_claude/
 # Large result directories (25GB+)
 _results_*/
 
-# Oracle consistency analysis (ignore all except utility scripts)
-oracle_consistency_analysis/*
-!oracle_consistency_analysis/screen_responses_v2.R
-!oracle_consistency_analysis/test_one_response.R
-!oracle_consistency_analysis/SUMMARY.md
-
 # Archived/superseded code
 archive/
 update/
@@ -95,5 +89,3 @@ results/
 
 # Aggregated multi-config results (can be regenerated)
 results_multi_config/
-claude.md
-p2_analysis/
