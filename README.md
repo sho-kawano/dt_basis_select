@@ -35,7 +35,9 @@ Benchmarks in method comparison:
 | `core_analysis/` | Paper analysis notebooks and figures (Sections 2–6) |
 | `results_summary/` | Aggregated results (S=50) |
 | `run_equal_allocation.R` | Driver: equal-allocation designs (Section 6.2) |
+| `aggregate_equal_allocation.R` | Aggregates equal-allocation results → `results_summary/` |
 | `run_methodcomp.R` | Driver: proportional-allocation method comparison (Section 6.3) |
+| `aggregate_methodcomp.R` | Aggregates method comparison results → `results_summary/` |
 
 ## Data
 

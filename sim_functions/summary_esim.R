@@ -29,20 +29,24 @@ summary_esim <- function(comp_no, results_dir,
       mutate(metric_type = "MSE")
 
     # IS: alpha=0.10 (90% CI); cr_int.lower/upper from mcmc_summary(level=0.9)
-    is_res <- results %>%
-      filter(method != "Direct") %>%
-      select(domain, cr_int.lower, cr_int.upper, method, nbasis) %>%
-      rename(fips = domain) %>%
-      left_join(truth_df, by = "fips") %>%
-      group_by(method, nbasis) %>%
-      reframe(metric = mean(
-        (cr_int.upper - cr_int.lower) +
-        (2 / 0.10) * pmax(cr_int.lower - truth, 0) +
-        (2 / 0.10) * pmax(truth - cr_int.upper, 0)
-      )) %>%
-      mutate(metric_type = "IS")
+    # Only computed when credible interval columns exist (Paper 2)
+    if (all(c("cr_int.lower", "cr_int.upper") %in% names(results))) {
+      is_res <- results %>%
+        filter(method != "Direct") %>%
+        select(domain, cr_int.lower, cr_int.upper, method, nbasis) %>%
+        rename(fips = domain) %>%
+        left_join(truth_df, by = "fips") %>%
+        group_by(method, nbasis) %>%
+        reframe(metric = mean(
+          (cr_int.upper - cr_int.lower) +
+          (2 / 0.10) * pmax(cr_int.lower - truth, 0) +
+          (2 / 0.10) * pmax(truth - cr_int.upper, 0)
+        )) %>%
+        mutate(metric_type = "IS")
+      mse_res <- bind_rows(mse_res, is_res)
+    }
 
-    bind_rows(mse_res, is_res) %>%
+    mse_res %>%
       mutate(sim_no = sim_no, comp_no = comp_no) %>%
       relocate(comp_no, sim_no)
   }

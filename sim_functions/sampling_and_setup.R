@@ -230,15 +230,18 @@ get_PS <- function(
 }
 
 # Performs stratified PPS sampling (using `get_PS`) across PUMA (Public Use Microdata Area)
+# samp_frac: either a scalar (same rate for all PUMAs) or a named vector keyed by PUMA id
+#            (per-PUMA rates for mixed precision designs).
 get_strat_PS <- function(pop_df, samp_frac = 0.01, min_sample_size = 30,
                          equal_allocation = FALSE, equal_n = 50) {
   PUMAs <- unique(pop_df$PUMA)
   weights <- idx <- c()
   for (PUMA in PUMAs) {
     puma_ids <- which(pop_df$PUMA == PUMA)
+    frac_i <- if (length(samp_frac) == 1) samp_frac else samp_frac[[as.character(PUMA)]]
     tmp <- get_PS(
       pop_df = pop_df[puma_ids, ],
-      samp_frac = samp_frac,
+      samp_frac = frac_i,
       min_sample_size = min_sample_size,
       equal_allocation = equal_allocation,
       equal_n = equal_n
