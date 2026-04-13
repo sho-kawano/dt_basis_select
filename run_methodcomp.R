@@ -4,12 +4,12 @@
 # ==============================================================================
 # Reproduces all results for the method comparison section.
 # Trio: prop_0.75pct / prop_1p25pct / prop_1p75pct
-# S=50 seeds per design, eps=0.7 R=5
+# S=50 seeds per design, eps=0.6 R=5
 #
 # Pipeline per design:
 #   1. setup_comp   — draw samples, compute z/d
 #   2. full_data_fit — fit 20 candidate FH models on each sample
-#   3. run_dt       — data thinning (eps=0.7, R=5)
+#   3. run_dt       — data thinning (eps=0.6, R=5)
 #   4. setup_esim   — generate synthetic direct estimates
 #   5. run_esim     — fit models on synthetic data (L=100)
 #
@@ -26,7 +26,7 @@ library(Matrix)
 
 N_CORES    <- 11
 SEEDS      <- 1:50
-EPSILON    <- 0.7
+EPSILON    <- 0.6
 N_REPS_DT  <- 5
 ESIM_ITERS <- 100
 
@@ -89,7 +89,7 @@ for (d in DESIGNS) {
   stopCluster(cl)
   cat(sprintf("  Done (%.1f sec)\n\n", (proc.time() - t0)[3]))
 
-  # --- 3. Data thinning (eps=0.7, R=5) ----------------------------------------
+  # --- 3. Data thinning (eps=0.6, R=5) ----------------------------------------
   cat(sprintf("DT eps=%.1f R=%d...\n", EPSILON, N_REPS_DT))
   t0 <- proc.time()
   cl <- makeCluster(N_CORES, type = "FORK")

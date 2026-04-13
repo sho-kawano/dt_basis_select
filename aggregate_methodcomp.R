@@ -3,7 +3,7 @@
 # aggregate_methodcomp.R — Aggregate Section 6.3 method comparison results
 # ==============================================================================
 # Trio: prop_0.75pct / prop_1p25pct / prop_1p75pct
-# Seeds 1-50, eps=0.7 R=5
+# Seeds 1-50, eps=0.6 R=5
 #
 # Collects: DT (MSE + NLL), Oracle/DIC/WAIC, ESIM
 # Output: results_summary/methodcomp_results.RDS
@@ -14,7 +14,7 @@ library(doParallel)
 library(tidyverse)
 
 N_CORES    <- 11
-EPS        <- 0.7
+EPS        <- 0.6
 REPS       <- 5
 ESIM_ITERS <- 100
 SEEDS      <- 1:50
@@ -39,7 +39,7 @@ for (d in DESIGNS) {
   cl <- makeForkCluster(N_CORES)
   registerDoParallel(cl)
 
-  # --- DT: MSE and plugin_NLL at eps=0.7 R=5 ---------------------------------
+  # --- DT: MSE and plugin_NLL at eps=0.6 R=5 ---------------------------------
   cat("  DT...")
   dt_raw <- parLapply(cl, SEEDS, function(x, res_dir) {
     source("sim_functions/summary_dt.R")
@@ -120,7 +120,7 @@ all_sel <- bind_rows(dic_sel, waic_sel, nll_sel, mse_sel, esim_sel) %>%
   left_join(oracle_sel, by=c("config","comp_no")) %>%
   mutate(deviation = selected_nbasis - oracle_nbasis)
 
-cat("\n=== MAE and bias (S=50, eps=0.7, R=5) ===\n")
+cat("\n=== MAE and bias (S=50, eps=0.6, R=5) ===\n")
 all_sel %>%
   group_by(config, method) %>%
   summarise(MAE=round(mean(abs(deviation)),2), bias=round(mean(deviation),1),
