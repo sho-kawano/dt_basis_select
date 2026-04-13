@@ -28,8 +28,6 @@ summary_esim <- function(comp_no, results_dir,
       reframe(metric = mean((estim - truth)^2)) %>%
       mutate(metric_type = "MSE")
 
-    # IS: alpha=0.10 (90% CI); cr_int.lower/upper from mcmc_summary(level=0.9)
-    # Only computed when credible interval columns exist (Paper 2)
     if (all(c("cr_int.lower", "cr_int.upper") %in% names(results))) {
       is_res <- results %>%
         filter(method != "Direct") %>%
