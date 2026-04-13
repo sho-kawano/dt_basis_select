@@ -3,6 +3,8 @@
 A design-based simulation study comparing methods for selecting the number of
 spatial basis functions in Fay-Herriot small area estimation models.
 
+**Paper:** Kawano, Parker, Li (2026). *On Data Thinning for Model Validation in Small Area Estimation.* [arXiv:2604.04141](https://arxiv.org/abs/2604.04141)
+
 ## Overview
 
 We use California PUMS 2019–2023 (~1.76M person records, 281 PUMAs) as a
@@ -13,8 +15,8 @@ Fay-Herriot models with p ∈ {3, 6, …, 60} Moran's I spatial basis functions
 via Gibbs sampling (`models/spatial_basis_fh.R`).
 
 Two sampling designs are considered. Equal allocation designs (target n_i per
-area: 30, 50, 75, 100) are used to study how the thinning fraction ε and number
-of repeats R affect model selection performance. Proportional-to-population
+area: 30, 50, 75, 100, 125) are used to study how the thinning fraction ε and
+number of repeats R affect model selection performance. Proportional-to-population
 allocation designs (0.75%, 1.25%, 1.75% sampling rates) are used to benchmark
 DT against existing methods under realistic sample size variation.
 Horvitz-Thompson direct estimates and design-based variance estimates are
@@ -26,8 +28,8 @@ Benchmarks in method comparison:
 
 ## Structure
 
-| Directory | Contents |
-|-----------|----------|
+| Directory / File | Contents |
+|------------------|----------|
 | `sim_functions/` | Core pipeline: sampling, model fitting, DT, ESIM, metrics |
 | `models/` | Spatial basis Fay-Herriot Gibbs sampler |
 | `core_analysis/` | Paper analysis notebooks and figures (Sections 2–6) |
