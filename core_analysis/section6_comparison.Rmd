@@ -244,7 +244,7 @@ ggsave("plot5_comparison.png", p, width = 10, height = 5, dpi = 300)
 
 # Output 2b: Histogram of Selected Basis Functions
 
-```{r histogram, fig.width=10, fig.height=10}
+```{r histogram, fig.width=10, fig.height=10, eval=FALSE}
 method_order_rev <- rev(method_order)  # ESIM on top
 
 p_hist <- ggplot(plot_df %>% mutate(method = factor(method, levels = method_order_rev)),
@@ -269,7 +269,7 @@ ggsave("plot5_comparison_hist.png", p_hist, width = 10, height = 10, dpi = 300)
 
 # Output 2c: Violin Plot of Selected Basis Functions
 
-```{r violin_plot, fig.width=10, fig.height=5}
+```{r violin_plot, fig.width=10, fig.height=5, eval=FALSE}
 p_violin <- ggplot(plot_df, aes(x = method, y = selected)) +
   geom_hline(yintercept = 15, linetype = "dashed", color = "red", linewidth = 0.5) +
   geom_violin(aes(fill = method %in% dt_methods), trim = TRUE, scale = "width", width = 0.8) +
