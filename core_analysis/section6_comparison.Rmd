@@ -1,0 +1,294 @@
+---
+title: "Section 6.3: Methods Comparison on Proportional Allocation Designs"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 6)
+library(tidyverse)
+library(knitr)
+```
+
+# Overview
+
+Comparison of model selection methods on **proportional allocation (PA) designs**:
+
+- **Designs:** 0.75%, 1.25%, 1.75% sampling rates
+- **Methods:** DT-MSE, DT-NLL (ε = 0.6, R=5), DIC, WAIC, ESIM
+- **Models:** p ∈ {3, 6, 9, ..., 60} spatial basis functions (20 candidate models)
+- **Samples:** S = 50 per design
+- **Oracle:** Average oracle (argmin_p mean_s MSE(p)) = p = 15 for all PA designs
+- **Metric:** RMSE from average oracle
+
+---
+
+# Data Loading
+
+```{r load_data}
+results <- readRDS("../results_summary/methodcomp_results.RDS")
+
+oracle_all <- results$oracle
+dt_all     <- results$dt
+esim_all   <- results$esim
+
+CONFIGS <- c("prop_0.75pct", "prop_1p25pct", "prop_1p75pct")
+config_labels <- c(prop_0.75pct = "0.75% PA", prop_1p25pct = "1.25% PA", prop_1p75pct = "1.75% PA")
+
+# Average oracle
+avg_oracle <- oracle_all %>%
+  filter(config %in% CONFIGS, !is.na(mse_true)) %>%
+  group_by(config, nbasis) %>%
+  summarise(avg_mse = mean(mse_true), .groups = "drop") %>%
+  group_by(config) %>%
+  slice_min(avg_mse, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(config, avg_oracle = nbasis)
+
+cat("Average oracle by design:\n")
+print(avg_oracle)
+```
+
+```{r selections}
+EPS <- results$metadata$epsilon  # 0.6
+
+# DT selections (MSE and NLL)
+dt_mse_sel <- dt_all %>%
+  filter(config %in% CONFIGS, loss_function == "MSE",
+         abs(epsilon - EPS) < 0.001, n_reps_used == 5) %>%
+  group_by(config, comp_no) %>%
+  slice_min(metric, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(method = "DT-MSE") %>%
+  select(config, comp_no, method, selected = nbasis)
+
+dt_nll_sel <- dt_all %>%
+  filter(config %in% CONFIGS, loss_function == "plugin_NLL",
+         abs(epsilon - EPS) < 0.001, n_reps_used == 5) %>%
+  group_by(config, comp_no) %>%
+  slice_min(metric, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(method = "DT-NLL") %>%
+  select(config, comp_no, method, selected = nbasis)
+
+# DIC / WAIC selections
+dic_sel <- oracle_all %>%
+  filter(config %in% CONFIGS) %>%
+  group_by(config, comp_no) %>%
+  slice_min(DIC, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(method = "DIC") %>%
+  select(config, comp_no, method, selected = nbasis)
+
+waic_sel <- oracle_all %>%
+  filter(config %in% CONFIGS) %>%
+  group_by(config, comp_no) %>%
+  slice_min(WAIC, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(method = "WAIC") %>%
+  select(config, comp_no, method, selected = nbasis)
+
+# ESIM selections
+esim_sel <- esim_all %>%
+  filter(config %in% CONFIGS, method == "ESIM_standard",
+         metric_type == "MSE", !is.na(nbasis)) %>%
+  group_by(config, comp_no) %>%
+  slice_min(metric, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(method = "ESIM") %>%
+  select(config, comp_no, method, selected = nbasis)
+
+# Combine and compute deviations from average oracle
+all_sel <- bind_rows(dt_mse_sel, dt_nll_sel, dic_sel, waic_sel, esim_sel) %>%
+  left_join(avg_oracle, by = "config") %>%
+  mutate(dev = selected - avg_oracle)
+
+cat(sprintf("Total selections: %d (%d methods × %d designs × %d samples)\n",
+            nrow(all_sel), n_distinct(all_sel$method),
+            n_distinct(all_sel$config), 50))
+```
+
+---
+
+# Output 1: RMSE and Bias Table
+
+```{r comparison_table}
+method_order <- c("DT-MSE", "DT-NLL", "DIC", "WAIC", "ESIM")
+
+# RMSE by method and design
+rmse_tab <- all_sel %>%
+  group_by(method, config) %>%
+  summarise(RMSE = sqrt(mean(dev^2)), .groups = "drop") %>%
+  mutate(config = config_labels[config]) %>%
+  pivot_wider(names_from = config, values_from = RMSE)
+
+# Overall RMSE
+overall_rmse <- all_sel %>%
+  group_by(method) %>%
+  summarise(Overall = sqrt(mean(dev^2)), .groups = "drop")
+
+cat("=== RMSE (average oracle) ===\n")
+rmse_tab %>%
+  left_join(overall_rmse, by = "method") %>%
+  mutate(method = factor(method, levels = method_order)) %>%
+  arrange(method) %>%
+  kable(digits = 2)
+
+# Bias by method and design
+bias_tab <- all_sel %>%
+  group_by(method, config) %>%
+  summarise(Bias = mean(dev), .groups = "drop") %>%
+  mutate(config = config_labels[config]) %>%
+  pivot_wider(names_from = config, values_from = Bias)
+
+overall_bias <- all_sel %>%
+  group_by(method) %>%
+  summarise(Overall = mean(dev), .groups = "drop")
+
+cat("\n=== Mean Bias (average oracle) ===\n")
+bias_tab %>%
+  left_join(overall_bias, by = "method") %>%
+  mutate(method = factor(method, levels = method_order)) %>%
+  arrange(method) %>%
+  kable(digits = 2)
+```
+
+```{r latex_table}
+# Build LaTeX table: RMSE only
+config_order <- c("prop_0.75pct", "prop_1p25pct", "prop_1p75pct")
+config_pct <- c("0.75", "1.25", "1.75")
+
+# Compute stats
+comp_stats <- all_sel %>%
+  group_by(method, config) %>%
+  summarise(RMSE = sqrt(mean(dev^2)), .groups = "drop")
+
+overall_rmse_stats <- all_sel %>%
+  group_by(method) %>%
+  summarise(RMSE_overall = sqrt(mean(dev^2)), .groups = "drop")
+
+latex_lines <- c(
+  "\\begin{table}[ht]",
+  "\\centering",
+  "\\begin{tabular}{l rrrr}",
+  "  \\toprule",
+  sprintf("  Method & %s & Overall \\\\",
+          paste(sprintf("%s\\%%", config_pct), collapse = " & "))
+)
+latex_lines <- c(latex_lines, "  \\midrule")
+
+dt_label <- sprintf("$\\\\epsilon$=%.1f", EPS)
+method_latex_names <- c(
+  "DT-MSE" = sprintf("DT-MSE %s", dt_label),
+  "DT-NLL" = sprintf("DT-NLL %s", dt_label),
+  "DIC" = "DIC", "WAIC" = "WAIC", "ESIM" = "ESIM"
+)
+
+for (m in method_order) {
+  row_data <- comp_stats %>% filter(method == m)
+  rmse_overall <- overall_rmse_stats %>% filter(method == m) %>% pull(RMSE_overall)
+  rmse_cells <- sapply(config_order, function(cfg)
+    sprintf("%.2f", row_data %>% filter(config == cfg) %>% pull(RMSE)))
+  latex_lines <- c(latex_lines,
+    sprintf("  %s & %s & %.2f \\\\", method_latex_names[m],
+            paste(rmse_cells, collapse = " & "),
+            rmse_overall))
+}
+
+latex_lines <- c(latex_lines,
+  "  \\bottomrule",
+  "\\end{tabular}",
+  sprintf("\\caption{RMSE of the selected basis count from the average oracle ($p^* = 15$) by method and design across $S=50$ simulation replicates. Columns indicate proportional allocation designs with overall sampling rates of 0.75\\%%, 1.25\\%%, and 1.75\\%%. Overall RMSE pools deviations across all three designs.}"),
+  "\\label{tab:comparison}",
+  "\\end{table}")
+
+writeLines(latex_lines, "table_comparison.tex")
+cat("\nGenerated LaTeX:\n")
+cat(paste(latex_lines, collapse = "\n"))
+```
+
+---
+
+# Output 2: Boxplot of Selected Basis Functions
+
+```{r boxplot, fig.width=10, fig.height=5}
+plot_df <- all_sel %>%
+  mutate(
+    design = factor(config_labels[config], levels = config_labels),
+    method = factor(method, levels = method_order)
+  )
+
+dt_methods <- c("DT-MSE", "DT-NLL")
+
+p <- ggplot(plot_df, aes(x = method, y = selected)) +
+  geom_hline(yintercept = 15, linetype = "dashed", color = "red", linewidth = 0.5) +
+  geom_boxplot(aes(fill = method %in% dt_methods), outlier.size = 0.8, width = 0.6) +
+  scale_fill_manual(values = c("TRUE" = "lightblue", "FALSE" = "gray90"), guide = "none") +
+  facet_wrap(~ design, nrow = 1) +
+  labs(x = NULL, y = "Selected number of basis functions",
+       ) +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 11, face = "bold"),
+        axis.text.x = element_text(angle = 30, hjust = 1, size = 9))
+
+print(p)
+ggsave("plot5_comparison.png", p, width = 10, height = 5, dpi = 300)
+```
+
+---
+
+# Output 2b: Histogram of Selected Basis Functions
+
+```{r histogram, fig.width=10, fig.height=10}
+method_order_rev <- rev(method_order)  # ESIM on top
+
+p_hist <- ggplot(plot_df %>% mutate(method = factor(method, levels = method_order_rev)),
+                 aes(x = selected, fill = method %in% dt_methods)) +
+  geom_vline(xintercept = 15, linetype = "dashed", color = "red", linewidth = 0.5) +
+  geom_bar() +
+  scale_fill_manual(values = c("TRUE" = "#5B9BD5", "FALSE" = "gray50"), guide = "none") +
+  scale_x_continuous(breaks = c(0, 15, 30, 45, 60)) +
+  facet_grid(method ~ design) +
+  labs(x = "Selected number of basis functions", y = "Count",
+       caption = "Dashed red line: average oracle (p = 15)") +
+  theme_minimal() +
+  theme(strip.text.x = element_text(size = 11, face = "bold"),
+        strip.text.y = element_text(size = 10, face = "bold"),
+        panel.spacing = unit(0.5, "lines"))
+
+print(p_hist)
+ggsave("plot5_comparison_hist.png", p_hist, width = 10, height = 10, dpi = 300)
+```
+
+---
+
+# Output 2c: Violin Plot of Selected Basis Functions
+
+```{r violin_plot, fig.width=10, fig.height=5}
+p_violin <- ggplot(plot_df, aes(x = method, y = selected)) +
+  geom_hline(yintercept = 15, linetype = "dashed", color = "red", linewidth = 0.5) +
+  geom_violin(aes(fill = method %in% dt_methods), trim = TRUE, scale = "width", width = 0.8) +
+  geom_boxplot(width = 0.1, outlier.shape = NA, fill = "white", alpha = 0.7) +
+  scale_fill_manual(values = c("TRUE" = "lightblue", "FALSE" = "gray90"), guide = "none") +
+  facet_wrap(~ design, nrow = 1) +
+  labs(x = NULL, y = "Selected number of basis functions") +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 11, face = "bold"),
+        axis.text.x = element_text(angle = 30, hjust = 1, size = 9))
+
+print(p_violin)
+ggsave("plot5_comparison_violin.png", p_violin, width = 10, height = 5, dpi = 300)
+```
+
+---
+
+# Session Info
+
+```{r session_info}
+sessionInfo()
+```

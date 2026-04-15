@@ -42,47 +42,52 @@ add_design <- function(df) mutate(df, design = factor(label_map[config], levels 
 # Selections
 
 ```{r selections}
-oracle_sel <- oracle_all %>%
-  group_by(config, comp_no) %>%
-  slice_min(mse_true, n = 1, with_ties = FALSE) %>%
-  ungroup() %>%
-  select(config, comp_no, oracle_nbasis = nbasis)
+# Average oracle: argmin_p mean_s MSE_s(p) per design
+avg_oracle <- oracle_all %>%
+  group_by(config, nbasis) %>%
+  summarise(avg_mse = mean(mse_true), .groups = "drop") %>%
+  group_by(config) %>%
+  slice_min(avg_mse, n = 1, with_ties = FALSE) %>%
+  select(config, avg_oracle_nbasis = nbasis)
+
+cat("Average oracle by design:\n"); print(avg_oracle)
 
 dt_sel <- dt_all %>%
   group_by(config, comp_no, epsilon, n_reps_used) %>%
   slice_min(metric, n = 1, with_ties = FALSE) %>%
   ungroup() %>%
   select(config, comp_no, epsilon, n_reps_used, dt_nbasis = nbasis) %>%
-  left_join(oracle_sel, by = c("config", "comp_no")) %>%
-  mutate(deviation = dt_nbasis - oracle_nbasis) %>%
+  left_join(avg_oracle, by = "config") %>%
+  mutate(deviation = dt_nbasis - avg_oracle_nbasis) %>%
   add_design()
-
-oracle_sel <- add_design(oracle_sel)
 ```
 
-# Figure: MAE and Mean Bias
+# Figure: RMSE and Mean Bias
 
 ```{r figure, fig.width=10, fig.height=7}
-# ── (a) MAE basis by design ────────────────────────────────────────────────
-mae_data <- dt_sel %>%
+# ── (a) RMSE from average oracle by design ─────────────────────────────────
+rmse_data <- dt_sel %>%
   filter(n_reps_used %in% c(1, 3, 5)) %>%
   group_by(design, epsilon, n_reps_used) %>%
-  summarise(mae = mean(abs(deviation)),
-            se = sd(abs(deviation)) / sqrt(n()), .groups = "drop")
+  summarise(
+    rmse = sqrt(mean(deviation^2)),
+    se   = sd(deviation^2) / (2 * sqrt(mean(deviation^2)) * sqrt(n())),
+    .groups = "drop"
+  )
 
-p_a <- ggplot(mae_data, aes(epsilon, mae,
-                             color = factor(n_reps_used),
-                             fill = factor(n_reps_used))) +
-  geom_ribbon(aes(ymin = mae - se, ymax = mae + se), alpha = 0.12, color = NA) +
+p_a <- ggplot(rmse_data, aes(epsilon, rmse,
+                              color = factor(n_reps_used),
+                              fill  = factor(n_reps_used))) +
+  geom_ribbon(aes(ymin = rmse - se, ymax = rmse + se), alpha = 0.12, color = NA) +
   geom_line(linewidth = 0.8) +
   geom_point(size = 1.5) +
   facet_wrap(~ design, labeller = label_parsed, nrow = 1) +
   scale_x_continuous(breaks = c(0.3, 0.6, 0.9)) +
   scale_color_brewer(palette = "Set1", name = "R") +
   scale_fill_brewer(palette = "Set1", name = "R") +
-  labs(title = "(a) Mean absolute error of selected number of basis functions",
+  labs(title = "(a) RMSE from average oracle basis count",
        x = expression(epsilon),
-       y = "MAE") +
+       y = "RMSE") +
   theme_minimal() +
   theme(legend.position = "bottom",
         plot.title = element_text(size = 11, face = "bold"),
@@ -107,7 +112,7 @@ p_b <- ggplot(bias_data, aes(epsilon, mean_bias,
   scale_x_continuous(breaks = c(0.3, 0.6, 0.9)) +
   scale_color_brewer(palette = "Set1", name = "R") +
   scale_fill_brewer(palette = "Set1", name = "R") +
-  labs(title = "(b) Mean bias of selected number of basis functions",
+  labs(title = "(b) Mean bias from average oracle basis count",
        x = expression(epsilon),
        y = "Mean Bias") +
   theme_minimal() +
@@ -116,7 +121,7 @@ p_b <- ggplot(bias_data, aes(epsilon, mean_bias,
         strip.text = element_text(size = 10))
 
 # ── Combine ────────────────────────────────────────────────────────────────
-fig <- p_a / p_b + plot_layout(guides = "collect") &
+fig <- (p_a / p_b) + plot_layout(guides = "collect") &
   theme(legend.position = "bottom")
 
 fig
