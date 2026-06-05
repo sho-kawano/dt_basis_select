@@ -1,5 +1,5 @@
 ---
-title: "Supplement: Data Thinning Illustration (6 Maps)"
+title: "Appendix: Data Thinning Illustration (6 Maps)"
 output:
   html_document:
     toc: false
@@ -113,5 +113,5 @@ row1 / row2 +
 ```
 
 ```{r save}
-ggsave("plot_supplement_thinning_maps.png", width = 15, height = 9, dpi = 200)
+ggsave("plot_appendix_thinning_maps.png", width = 15, height = 9, dpi = 200)
 ```

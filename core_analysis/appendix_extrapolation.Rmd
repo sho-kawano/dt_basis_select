@@ -1,0 +1,390 @@
+---
+title: "Appendix: Polynomial Structure and Extrapolation"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 7, dpi = 150)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r load-data}
+to  <- readRDS("../results_summary/thinned_oracle_s50.RDS") %>%
+  filter(n_reps_used == 1)
+res <- readRDS("../results_summary/equal_allocation_results.RDS")
+
+oracle_full <- res$oracle %>%
+  select(comp_no, config, nbasis, full_mse = mse_true)
+
+# Per-sample gap
+gap_df <- to %>%
+  left_join(oracle_full, by = c("comp_no", "config", "nbasis")) %>%
+  mutate(gap = thinned_mse - full_mse,
+         t = (1 - epsilon) / epsilon) %>%
+  filter(!is.na(gap))
+
+# Seed-averaged gap
+gap_avg <- gap_df %>%
+  group_by(config, nbasis, epsilon, t) %>%
+  summarise(mean_gap = mean(gap), .groups = "drop")
+
+config_labels <- c("equal_30" = "n = 30", "equal_40" = "n = 40",
+                   "equal_50" = "n = 50", "equal_75" = "n = 75",
+                   "equal_100" = "n = 100", "equal_125" = "n = 125")
+
+nb_show <- c(6, 18, 30, 42)
+```
+
+# Appendix content
+
+Everything above the "Extra analysis" section below maps directly to the
+paper appendix (Section `\ref{app:extrapolation}`).
+
+## 1. Polynomial Structure of the Gap
+
+Under the Fay--Herriot model with known $\beta$ and $\sigma^2$
+(Proposition 3.1 conditions), the per-area thinning gap is
+$$
+\Delta_i(\varepsilon) = \frac{1 - \varepsilon}{\varepsilon}\, \gamma_i(\varepsilon)\, \gamma_i\, d_i.
+$$
+Reparametrize to $t = (1 - \varepsilon)/\varepsilon$, the odds of
+withheld-to-retained data, so that $t = 0$ corresponds to the
+full-data limit $\varepsilon = 1$. Defining
+$\alpha_i = 1 - \gamma_i = d_i / (\sigma^2 + d_i)$ and substituting
+$\varepsilon = 1/(1+t)$, the gap simplifies to
+$$
+\Delta_i(\varepsilon) = \gamma_i^2\, d_i \cdot \frac{t}{1 + \alpha_i\, t}.
+$$
+This is a ratio of linear polynomials in $t$: it vanishes at $t = 0$,
+is monotonically increasing and concave, and is well-approximated by
+a low-order polynomial for moderate $t$. The $g_{2i}(\varepsilon)$
+correction from Proposition 3.2 (estimated $\beta$) is $O(p/m)$ and
+itself rational in $t$, so the polynomial structure is preserved
+under estimated parameters.
+
+
+## 2. Empirical Validation
+
+We use the **oracle thinned MSE** (Theorem 1 estimand, evaluated
+at the true $\theta_i$ rather than the test-set proxy).
+
+### Average gap vs $t$
+
+The oracle thinning gap averaged over $S = 50$ simulated samples,
+plotted against $t = (1 - \varepsilon)/\varepsilon$ for three
+representative basis counts: $p = 6$ (simple), $p = 18$ (moderate),
+$p = 42$ (complex). Each point is one
+(design, $p$, $\varepsilon$) cell; the line is the OLS linear fit
+through the origin.
+
+```{r plot-avg-gap, fig.height=8}
+gap_line <- gap_avg %>%
+  filter(nbasis %in% nb_show) %>%
+  mutate(config_lab = config_labels[config],
+         nbasis_lab = factor(paste0("p = ", nbasis),
+                             levels = paste0("p = ", sort(nb_show))))
+
+ggplot(gap_line, aes(x = t, y = mean_gap, color = nbasis_lab)) +
+  geom_point(size = 2.5) +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              linewidth = 0.8) +
+  facet_wrap(~ config_lab, scales = "free_y", nrow = 2) +
+  scale_color_brewer(palette = "Set1", name = "Model") +
+  labs(x = expression(t == (1 - epsilon) / epsilon),
+       y = "Oracle thinning gap (average over 50 samples)") +
+  theme_minimal(base_size = 13) +
+  theme(panel.grid.minor = element_blank(),
+        legend.position = "bottom",
+        strip.text = element_text(face = "bold"))
+
+ggsave("plot_appendix_extrapolation.png",
+       width = 10, height = 7, dpi = 300)
+```
+
+The averaged gap is approximately linear in $t$ across all designs
+and model complexities, consistent with the polynomial structure from
+Section 1. More complex models ($p = 42$) have larger gaps, as
+expected from the theory.
+
+### Pooled extrapolation estimator
+
+The polynomial structure suggests estimating
+$\text{MSE}_\text{full}$ by evaluating
+$\widehat{\text{MSE}}_\varepsilon$ at a grid
+$\varepsilon_1, \ldots, \varepsilon_K$, fitting
+$$
+\widehat{\text{MSE}}_{\varepsilon_k} = \alpha_0 + \alpha_1\, t_k + \alpha_2\, t_k^2 + \eta_k,
+$$
+and taking the intercept $\hat\alpha_0$ as the extrapolation to
+$t = 0$ ($\varepsilon = 1$). Under oracle conditions (known
+$\theta_i$, no test-set noise), this estimator agrees with the oracle
+$p^*$ in all 6 equal-allocation designs, confirming the polynomial
+functional form.
+
+## 3. Feasible Extrapolation Fails
+
+The feasible $\widehat{\text{MSE}}_\varepsilon$ (Theorem 1) replaces
+$\theta_i$ with the test-set proxy
+$z_i^{(2)} / (1 - \varepsilon)$, introducing noise of variance
+$d_i / (1 - \varepsilon)$ per area. For each sample, the pooled
+estimator fits the regression using $R = 5$ thinning
+replicates at each grid point and selects the basis count with the
+smallest intercept $\hat\alpha_0$. We test both quadratic and linear
+fits over two grids:
+$\varepsilon \in \{0.3, 0.4, 0.5, 0.6, 0.7\}$ ($K = 5$) and
+$\varepsilon \in \{0.5, 0.6, 0.7\}$ ($K = 3$).
+The baseline is single-$\varepsilon$ selection (pick the basis count
+minimizing $\widehat{\text{MSE}}_\varepsilon$ at a fixed $\varepsilon$).
+The evaluation metric is RMSE of the selected basis count relative to
+the per-sample oracle $p^*$.
+
+```{r feasible-table}
+N_REPS <- 5
+LOSS   <- "MSE"
+
+dt_all <- res$dt_1fold %>%
+  filter(loss_function == LOSS, n_reps_used == N_REPS) %>%
+  mutate(epsilon = round(epsilon, 1), u = (1 - epsilon) / epsilon) %>%
+  select(config, comp_no, nbasis, epsilon, u, mse_hat = metric)
+
+# Average oracle p* (matches main paper definition)
+oracle_pstar <- res$oracle %>%
+  group_by(config, nbasis) %>%
+  summarise(avg_mse = mean(mse_true), .groups = "drop") %>%
+  group_by(config) %>%
+  slice_min(avg_mse, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(config, oracle_p = nbasis)
+
+rmse_score <- function(picks) {
+  picks %>%
+    left_join(oracle_pstar, by = "config") %>%
+    group_by(config) %>%
+    summarise(rmse_p = sqrt(mean((nbasis - oracle_p)^2)), .groups = "drop")
+}
+
+# Pooled estimators (OLS)
+run_pooled <- function(grid, degree) {
+  sub <- dt_all %>% filter(epsilon %in% grid)
+  intercepts <- sub %>%
+    group_by(config, comp_no, nbasis) %>%
+    summarise(
+      alpha = if (degree == "quadratic") {
+        coef(lm(mse_hat ~ u + I(u^2)))[1]
+      } else {
+        coef(lm(mse_hat ~ u))[1]
+      },
+      .groups = "drop")
+  intercepts %>%
+    group_by(config, comp_no) %>%
+    slice_min(alpha, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    rmse_score()
+}
+
+# Single-epsilon baselines
+run_single <- function(e) {
+  dt_all %>%
+    filter(abs(epsilon - e) < 0.01) %>%
+    group_by(config, comp_no) %>%
+    slice_min(mse_hat, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    rmse_score()
+}
+
+methods <- list(
+  list(label = "Quadratic [0.3, 0.7]", fn = function() run_pooled(seq(0.3, 0.7, 0.1), "quadratic")),
+  list(label = "Linear [0.3, 0.7]",    fn = function() run_pooled(seq(0.3, 0.7, 0.1), "linear")),
+  list(label = "Linear [0.5, 0.7]",    fn = function() run_pooled(seq(0.5, 0.7, 0.1), "linear"))
+)
+
+baselines <- list(
+  list(label = "eps = 0.5", fn = function() run_single(0.5)),
+  list(label = "eps = 0.6", fn = function() run_single(0.6)),
+  list(label = "eps = 0.7", fn = function() run_single(0.7))
+)
+
+configs <- c("equal_30", "equal_40", "equal_50",
+             "equal_75", "equal_100", "equal_125")
+
+build_row <- function(m) {
+  r <- m$fn()
+  vals <- sapply(configs, function(cf) {
+    v <- r$rmse_p[r$config == cf]
+    if (length(v) == 0) NA else round(v, 1)
+  })
+  c(Method = m$label, setNames(vals, config_labels[configs]))
+}
+
+tbl <- bind_rows(
+  lapply(methods, build_row) %>% bind_rows(),
+  tibble(Method = "---", `n = 30` = "", `n = 40` = "", `n = 50` = "",
+         `n = 75` = "", `n = 100` = "", `n = 125` = ""),
+  lapply(baselines, build_row) %>% bind_rows()
+)
+
+knitr::kable(tbl,
+             caption = "RMSE of selected nbasis vs per-sample oracle p* (R = 5, DT-MSE)",
+             align = c("l", rep("r", 6)))
+```
+
+The pooled estimator underperforms every single-$\varepsilon$ baseline
+across all 6 designs. The degradation is largest at high sample sizes
+($n = 100$, $n = 125$) where the true model spread is smallest and
+the extrapolation noise is most damaging relative to the signal.
+
+Linear and quadratic pooled fits perform similarly, confirming that the
+issue is extrapolation distance to $t = 0$, not polynomial degree.
+
+
+---
+
+# Extra analysis
+
+Additional plots and tables not included in the paper appendix.
+Retained for reproducibility and deeper investigation.
+
+## Per-sample gap vs $t$
+
+The same oracle thinning gap, but now showing per-sample linear fits.
+Each line is the OLS fit for a single simulated sample ($S = 50$
+lines per panel). This shows whether the linear relationship holds
+sample-by-sample, not just on average.
+
+```{r plot-persample-gap, fig.height=8}
+gap_spaghetti <- gap_df %>%
+  filter(nbasis %in% nb_show) %>%
+  mutate(config_lab = config_labels[config],
+         nbasis_lab = paste0("p = ", nbasis))
+
+ggplot(gap_spaghetti, aes(x = t, y = gap,
+                           group = interaction(comp_no, nbasis_lab),
+                           color = nbasis_lab)) +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              alpha = 0.3, linewidth = 0.3) +
+  facet_wrap(~ config_lab, scales = "free_y", nrow = 2) +
+  scale_color_brewer(palette = "Set1", name = "Model") +
+  labs(x = expression(t == (1 - epsilon) / epsilon),
+       y = "Oracle thinning gap (per-sample linear fits)") +
+  theme_minimal(base_size = 13) +
+  theme(panel.grid.minor = element_blank(),
+        legend.position = "bottom",
+        strip.text = element_text(face = "bold"))
+```
+
+The linear relationship holds per-sample: individual fitted lines are
+approximately parallel, confirming the polynomial structure is not an
+artifact of averaging. The vertical spread across samples reflects
+the across-sample variance --- the variability due to which particular
+sample $y$ was drawn from the population.
+
+
+## Oracle pooled estimator: detailed tables
+
+### Seed-averaged oracle agreement
+
+```{r oracle-avg}
+pool_dat <- gap_avg %>%
+  left_join(oracle_full %>%
+              group_by(config, nbasis) %>%
+              summarise(mean_full = mean(full_mse), .groups = "drop"),
+            by = c("config", "nbasis")) %>%
+  mutate(mean_thin = mean_gap + mean_full)
+
+oracle_pick_avg <- pool_dat %>%
+  select(config, nbasis, mean_full) %>%
+  distinct() %>%
+  group_by(config) %>%
+  slice_min(mean_full, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(config, oracle_p = nbasis)
+
+pooled_pick_avg <- pool_dat %>%
+  group_by(config, nbasis) %>%
+  summarise(alpha_hat = coef(lm(mean_thin ~ t + I(t^2)))[1],
+            .groups = "drop") %>%
+  group_by(config) %>%
+  slice_min(alpha_hat, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(config, pooled_p = nbasis)
+
+comp_avg <- oracle_pick_avg %>%
+  left_join(pooled_pick_avg, by = "config") %>%
+  mutate(match = oracle_p == pooled_p,
+         config_lab = config_labels[config])
+
+knitr::kable(comp_avg %>% select(Design = config_lab,
+                                  `Oracle p*` = oracle_p,
+                                  `Pooled p*` = pooled_p,
+                                  Match = match),
+             caption = "Seed-averaged oracle: pooled estimator vs oracle p*")
+```
+
+### Per-sample oracle RMSE
+
+```{r oracle-persample}
+oracle_thin_persample <- gap_df %>%
+  mutate(thinned_mse_val = gap + full_mse) %>%
+  select(config, comp_no, nbasis, epsilon, t, thinned_mse = thinned_mse_val)
+
+oracle_pstar_persample <- oracle_full %>%
+  group_by(config, comp_no) %>%
+  slice_min(full_mse, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(config, comp_no, oracle_p = nbasis)
+
+pooled_persample <- oracle_thin_persample %>%
+  group_by(config, comp_no, nbasis) %>%
+  summarise(alpha_hat = coef(lm(thinned_mse ~ t + I(t^2)))[1],
+            .groups = "drop") %>%
+  group_by(config, comp_no) %>%
+  slice_min(alpha_hat, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(config, comp_no, pooled_p = nbasis)
+
+single_oracle <- function(eps_val) {
+  oracle_thin_persample %>%
+    filter(abs(epsilon - eps_val) < 0.01) %>%
+    group_by(config, comp_no) %>%
+    slice_min(thinned_mse, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    select(config, comp_no, sel_p = nbasis) %>%
+    left_join(oracle_pstar_persample, by = c("config", "comp_no")) %>%
+    group_by(config) %>%
+    summarise(rmse = sqrt(mean((sel_p - oracle_p)^2)), .groups = "drop")
+}
+
+pooled_score <- pooled_persample %>%
+  left_join(oracle_pstar_persample, by = c("config", "comp_no")) %>%
+  group_by(config) %>%
+  summarise(rmse = sqrt(mean((pooled_p - oracle_p)^2)), .groups = "drop") %>%
+  mutate(method = "Pooled quadratic")
+
+single_scores <- bind_rows(
+  single_oracle(0.5) %>% mutate(method = "eps = 0.5"),
+  single_oracle(0.6) %>% mutate(method = "eps = 0.6"),
+  single_oracle(0.7) %>% mutate(method = "eps = 0.7")
+)
+
+oracle_tbl <- bind_rows(pooled_score, single_scores) %>%
+  tidyr::pivot_wider(names_from = config, values_from = rmse) %>%
+  select(Method = method, all_of(names(config_labels)))
+
+names(oracle_tbl)[-1] <- config_labels[names(oracle_tbl)[-1]]
+oracle_tbl[-1] <- round(oracle_tbl[-1], 1)
+
+knitr::kable(oracle_tbl,
+             caption = "Per-sample oracle: RMSE of selected p vs per-sample oracle p*",
+             align = c("l", rep("r", 6)))
+```
+
+Under oracle conditions (known $\theta_i$), the per-sample pooled
+estimator should still benefit from the correct polynomial structure.
+The comparison to single-$\varepsilon$ baselines shows how much the
+extrapolation helps (or doesn't) even before test-set noise enters.
