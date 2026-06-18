@@ -221,5 +221,5 @@ cat("===========================================================================
 cat("  EQUAL ALLOCATION COMPLETE\n")
 cat("================================================================================\n")
 cat("\nNext steps:\n")
-cat("1. Run aggregate_equal_allocation.R to aggregate results\n")
+cat("1. Run aggregate_main.R to aggregate results\n")
 cat("2. Re-render analysis notebooks to update figures\n\n")

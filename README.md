@@ -14,11 +14,11 @@ PPS sampling (`sim_functions/sampling_and_setup.R`) and fit candidate
 Fay-Herriot models with p ∈ {3, 6, …, 60} Moran's I spatial basis functions
 via Gibbs sampling (`models/spatial_basis_fh.R`).
 
-Two sampling designs are considered. Equal allocation designs (target n_i per
-area: 30, 40, 50, 75, 100, 125) are used to study how the thinning fraction ε and
-number of repeats R affect model selection performance. Proportional-to-population
-allocation designs (0.75%, 1.25%, 1.75% sampling rates) are used to benchmark
-DT against existing methods under realistic sample size variation.
+Equal allocation designs (target n_i per area: 30, 40, 50, 75, 100, 125)
+study how the thinning fraction ε and number of repeats R affect model
+selection performance (Section 6.2). Three proportional allocation designs
+(0.75%, 1.25%, 1.75% sampling rates) benchmark DT against existing methods
+(Section 6.3).
 Horvitz-Thompson direct estimates and design-based variance estimates are
 computed via `survey::svymean()`.
 
@@ -34,9 +34,9 @@ Benchmarks in method comparison:
 | `models/` | Spatial basis Fay-Herriot Gibbs sampler |
 | `core_analysis/` | Paper analysis notebooks and figures (Sections 2–6) |
 | `results_summary/` | Aggregated results (S=50) |
-| `run_equal_allocation.R` | Driver: equal-allocation designs (Section 6.2) |
-| `aggregate_equal_allocation.R` | Aggregates equal-allocation results → `results_summary/` |
-| `run_methodcomp.R` | Driver: proportional-allocation method comparison (Section 6.3) |
+| `main.R` | Driver: setup, fits, DT for 6 EA designs (Sections 2–6.2) |
+| `aggregate_main.R` | Aggregates main results → `results_summary/` |
+| `run_methodcomp.R` | PA method comparison: setup, fits, DT, ESIM (Section 6.3) |
 | `aggregate_methodcomp.R` | Aggregates method comparison results → `results_summary/` |
 
 ## Data

@@ -77,27 +77,31 @@ at the true $\theta_i$ rather than the test-set proxy).
 ### Average gap vs $t$
 
 The oracle thinning gap averaged over $S = 50$ simulated samples,
-plotted against $t = (1 - \varepsilon)/\varepsilon$ for three
-representative basis counts: $p = 6$ (simple), $p = 18$ (moderate),
-$p = 42$ (complex). Each point is one
-(design, $p$, $\varepsilon$) cell; the line is the OLS linear fit
-through the origin.
+plotted against $t = (1 - \varepsilon)/\varepsilon$ for four
+representative basis counts: $p = 6$ (simple), $p = 18$ and $p = 30$
+(moderate), $p = 42$ (complex). We restrict to $\varepsilon \geq 0.3$
+($t \leq 2.33$), the range spanned by the extrapolation grids; the
+saturating large-$t$ tail ($\varepsilon = 0.1, 0.2$) is never used and
+is omitted. Over this range the gap is approximately linear in $t$,
+heading to $0$ at $t = 0$ ($\varepsilon = 1$), consistent with the
+leading $\Delta \approx c\,t$ term of the polynomial structure from
+Section 1. Each point is one (design, $p$, $\varepsilon$) cell; the
+line is the OLS fit.
 
 ```{r plot-avg-gap, fig.height=8}
 gap_line <- gap_avg %>%
-  filter(nbasis %in% nb_show) %>%
+  filter(nbasis %in% nb_show, epsilon >= 0.3) %>%   # t <= 2.33, the extrapolation-grid range
   mutate(config_lab = config_labels[config],
          nbasis_lab = factor(paste0("p = ", nbasis),
                              levels = paste0("p = ", sort(nb_show))))
 
 ggplot(gap_line, aes(x = t, y = mean_gap, color = nbasis_lab)) +
   geom_point(size = 2.5) +
-  geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
-              linewidth = 0.8) +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = 0.8) +
   facet_wrap(~ config_lab, scales = "free_y", nrow = 2) +
   scale_color_brewer(palette = "Set1", name = "Model") +
   labs(x = expression(t == (1 - epsilon) / epsilon),
-       y = "Oracle thinning gap (average over 50 samples)") +
+       y = "Oracle thinning gap") +
   theme_minimal(base_size = 13) +
   theme(panel.grid.minor = element_blank(),
         legend.position = "bottom",
@@ -107,10 +111,11 @@ ggsave("plot_appendix_extrapolation.png",
        width = 10, height = 7, dpi = 300)
 ```
 
-The averaged gap is approximately linear in $t$ across all designs
-and model complexities, consistent with the polynomial structure from
-Section 1. More complex models ($p = 42$) have larger gaps, as
-expected from the theory.
+On the original $t$ vs gap axes the averaged gap is approximately
+linear across all designs and model complexities, heading to the
+origin, consistent with the $\Delta \approx c\,t$ leading term of the
+polynomial structure from Section 1. More complex models ($p = 42$)
+have larger gaps, as expected from the theory.
 
 ### Pooled extrapolation estimator
 

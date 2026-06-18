@@ -68,7 +68,10 @@ update/
 _archive/
 models/_archive/
 core_analysis/plots_before_change/
-"core_analysis/Design-Based Sim Summary.md"
+core_analysis/Design-Based\ Sim\ Summary.md
+core_analysis/figures/
+core_analysis/figures_arXiv/
+core_analysis/allocation_comparison_memo.tex
 
 # Old/superseded summary scripts
 summarize_results.R

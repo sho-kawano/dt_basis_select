@@ -21,7 +21,7 @@ options(tigris_use_cache = TRUE)
 
 ```{r config}
 # Sampling design to visualize
-CONFIG <- "equal_75"  # Options: equal_40, equal_50, equal_75, equal_100, prop_0.5pct, etc.
+CONFIG <- "equal_75" # Options: equal_40, equal_50, equal_75, equal_100, prop_0.5pct, etc.
 
 # Which comparison to use
 COMP_NO <- 13
@@ -94,9 +94,11 @@ map_data <- ca_pumas %>%
   inner_join(estimates_df, by = "PUMA") %>%
   mutate(nbasis = factor(nbasis, levels = NBASIS_VALUES))
 
-cat(sprintf("Loaded %d PUMA boundaries with estimates for nbasis: %s\n",
-            nrow(map_data) / length(NBASIS_VALUES),
-            paste(NBASIS_VALUES, collapse = ", ")))
+cat(sprintf(
+  "Loaded %d PUMA boundaries with estimates for nbasis: %s\n",
+  nrow(map_data) / length(NBASIS_VALUES),
+  paste(NBASIS_VALUES, collapse = ", ")
+))
 ```
 
 # Figure 0: Spatial Smoothing Across Model Complexity
@@ -117,12 +119,18 @@ plots_with_inset <- lapply(unique(map_data$nbasis), function(nb) {
   p_main <- ggplot(data_nb) +
     geom_sf(aes(fill = spatial_smooth), color = "gray30", linewidth = 0.1) +
     # Add rectangle showing zoom area
-    geom_rect(aes(xmin = la_bbox["xmin"], xmax = la_bbox["xmax"],
-                  ymin = la_bbox["ymin"] + 0.1, ymax = la_bbox["ymax"]),
-              fill = NA, color = "red", linewidth = 0.8, inherit.aes = FALSE) +
-    scale_fill_gradient(low = "white", high = "darkblue",
-                       limits = range(map_data$spatial_smooth),
-                       name = TeX("$X\\beta$")) +
+    geom_rect(
+      aes(
+        xmin = la_bbox["xmin"], xmax = la_bbox["xmax"],
+        ymin = la_bbox["ymin"] + 0.1, ymax = la_bbox["ymax"]
+      ),
+      fill = NA, color = "red", linewidth = 0.8, inherit.aes = FALSE
+    ) +
+    scale_fill_gradient(
+      low = "white", high = "darkblue",
+      limits = range(map_data$spatial_smooth),
+      name = TeX("$X\\beta$")
+    ) +
     # scale_fill_viridis_c(
     #   option = "viridis",
     #   limits = range(map_data$spatial_smooth),
@@ -143,11 +151,15 @@ plots_with_inset <- lapply(unique(map_data$nbasis), function(nb) {
   # Zoom inset (smaller)
   p_inset <- ggplot(data_nb) +
     geom_sf(aes(fill = spatial_smooth), color = "gray30", linewidth = 0.3) +
-    coord_sf(xlim = c(la_bbox["xmin"], la_bbox["xmax"]),
-             ylim = c(la_bbox["ymin"], la_bbox["ymax"]),
-             expand = FALSE) +
-    scale_fill_gradient(low = "white", high = "darkblue",
-                       limits = range(map_data$spatial_smooth)) +
+    coord_sf(
+      xlim = c(la_bbox["xmin"], la_bbox["xmax"]),
+      ylim = c(la_bbox["ymin"], la_bbox["ymax"]),
+      expand = FALSE
+    ) +
+    scale_fill_gradient(
+      low = "white", high = "darkblue",
+      limits = range(map_data$spatial_smooth)
+    ) +
     # scale_fill_viridis_c(
     #   option = "viridis",
     #   limits = range(map_data$spatial_smooth)
@@ -175,9 +187,11 @@ plots_with_inset <- lapply(unique(map_data$nbasis), function(nb) {
       xmin = inset_xmin, xmax = inset_xmax,
       ymin = inset_ymin, ymax = inset_ymax
     ) +
-    annotate("rect", xmin = inset_xmin, xmax = inset_xmax,
-             ymin = inset_ymin, ymax = inset_ymax,
-             fill = NA, color = "red", linewidth = 0.8)
+    annotate("rect",
+      xmin = inset_xmin, xmax = inset_xmax,
+      ymin = inset_ymin, ymax = inset_ymax,
+      fill = NA, color = "red", linewidth = 0.8
+    )
 
   p_with_inset
 })
@@ -186,9 +200,14 @@ plots_with_inset <- lapply(unique(map_data$nbasis), function(nb) {
 library(patchwork)
 combined <- wrap_plots(plots_with_inset, nrow = 1) +
   plot_annotation(
-    #title = "Spatial Smoothing with Los Angeles Inset (red box)",
-    #theme = theme(plot.title = element_text(size = 24, face = "bold"))
+    # title = "Spatial Smoothing with Los Angeles Inset (red box)",
+    # theme = theme(plot.title = element_text(size = 24, face = "bold"))
   )
+
+combined_vertical <- wrap_plots(plots_with_inset, ncol = 1) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "right")
+
 combined
 ```
 
@@ -196,7 +215,8 @@ combined
 
 
 ```{r}
-ggsave("plot0_la_zoom.png", combined, width = 12, height = 8, dpi = 300)
+ggsave("plot0_la_zoom.png", combined, width = 10, height = 5, dpi = 300)
+ggsave("plot0_la_zoom_vertical.png", combined_vertical, width = 5.2, height = 9.2, dpi = 300)
 ```
 
 
@@ -218,11 +238,17 @@ plots_with_inset_sf <- lapply(unique(map_data$nbasis), function(nb) {
   p_main <- ggplot(data_nb) +
     geom_sf(aes(fill = spatial_smooth), color = "gray30", linewidth = 0.1) +
     # Add rectangle showing zoom area
-    geom_rect(aes(xmin = sf_bbox["xmin"], xmax = sf_bbox["xmax"],
-                  ymin = sf_bbox["ymin"], ymax = sf_bbox["ymax"]),
-              fill = NA, color = "red", linewidth = 0.8, inherit.aes = FALSE) +
-    scale_fill_gradient(low = "white", high = "darkblue",
-                       limits = range(map_data$spatial_smooth)) +
+    geom_rect(
+      aes(
+        xmin = sf_bbox["xmin"], xmax = sf_bbox["xmax"],
+        ymin = sf_bbox["ymin"], ymax = sf_bbox["ymax"]
+      ),
+      fill = NA, color = "red", linewidth = 0.8, inherit.aes = FALSE
+    ) +
+    scale_fill_gradient(
+      low = "white", high = "darkblue",
+      limits = range(map_data$spatial_smooth)
+    ) +
     # scale_fill_viridis_c(
     #   option = "viridis",
     #   limits = range(map_data$spatial_smooth),
@@ -241,11 +267,15 @@ plots_with_inset_sf <- lapply(unique(map_data$nbasis), function(nb) {
   # Zoom inset (smaller)
   p_inset <- ggplot(data_nb) +
     geom_sf(aes(fill = spatial_smooth), color = "gray30", linewidth = 0.3) +
-    coord_sf(xlim = c(sf_bbox["xmin"], sf_bbox["xmax"]),
-             ylim = c(sf_bbox["ymin"], sf_bbox["ymax"]),
-             expand = FALSE) +
-    scale_fill_gradient(low = "white", high = "darkblue",
-                       limits = range(map_data$spatial_smooth)) +
+    coord_sf(
+      xlim = c(sf_bbox["xmin"], sf_bbox["xmax"]),
+      ylim = c(sf_bbox["ymin"], sf_bbox["ymax"]),
+      expand = FALSE
+    ) +
+    scale_fill_gradient(
+      low = "white", high = "darkblue",
+      limits = range(map_data$spatial_smooth)
+    ) +
     # scale_fill_viridis_c(
     #   option = "viridis",
     #   limits = range(map_data$spatial_smooth)
@@ -273,9 +303,11 @@ plots_with_inset_sf <- lapply(unique(map_data$nbasis), function(nb) {
       xmin = inset_xmin, xmax = inset_xmax,
       ymin = inset_ymin, ymax = inset_ymax
     ) +
-    annotate("rect", xmin = inset_xmin, xmax = inset_xmax,
-             ymin = inset_ymin, ymax = inset_ymax,
-             fill = NA, color = "red", linewidth = 0.8)
+    annotate("rect",
+      xmin = inset_xmin, xmax = inset_xmax,
+      ymin = inset_ymin, ymax = inset_ymax,
+      fill = NA, color = "red", linewidth = 0.8
+    )
 
   p_with_inset
 })
@@ -283,13 +315,13 @@ plots_with_inset_sf <- lapply(unique(map_data$nbasis), function(nb) {
 # Combine plots side by side using patchwork
 combined_sf <- wrap_plots(plots_with_inset_sf, nrow = 1) +
   plot_annotation(
-    #title = "Spatial Smoothing with SF Bay Area Inset (red box)",
+    # title = "Spatial Smoothing with SF Bay Area Inset (red box)",
     theme = theme(plot.title = element_text(size = 16, face = "bold"))
   )
 
 combined_sf
 
-#ggsave("plot0_sf_zoom.png", combined_sf, width = 14, height = 6, dpi = 300)
+# ggsave("plot0_sf_zoom.png", combined_sf, width = 14, height = 6, dpi = 300)
 ```
 
 **Key observation:** The SF Bay Area inset demonstrates spatial smoothing across the dense urban core. With nbasis = 6, SF/Oakland/San Jose appear as one smooth region. With nbasis = 60, distinct patterns emerge for each city and neighborhood.
